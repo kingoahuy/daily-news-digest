@@ -1,0 +1,7 @@
+openai
+feedparser
+python-dotenv
+PyYAML
+markdown
+beautifulsoup4
+tzdata

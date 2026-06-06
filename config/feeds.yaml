@@ -1,0 +1,29 @@
+finance:
+  - name: CNA Business
+    url: "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6936"
+  - name: Yahoo Finance
+    url: "https://finance.yahoo.com/news/rssindex"
+
+politics:
+  - name: CNA World
+    url: "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6311"
+  - name: CNA Asia
+    url: "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6511"
+
+society:
+  - name: CNA Latest
+    url: "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml"
+  - name: CNA Singapore
+    url: "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=10416"
+
+sports:
+  - name: CNA Sport
+    url: "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=10296"
+  - name: ESPN Top Headlines
+    url: "https://www.espn.com/espn/rss/news"
+
+technology:
+  - name: The Verge
+    url: "https://www.theverge.com/rss/index.xml"
+  - name: TechCrunch
+    url: "https://techcrunch.com/feed/"
