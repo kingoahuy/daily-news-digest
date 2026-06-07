@@ -63,7 +63,7 @@
       "type": "process",
       "command": "python",
       "args": [
-        "scripts/status_web.py"
+        "scripts/status_api.py"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -75,7 +75,32 @@
       "type": "process",
       "command": "python",
       "args": [
-        "scripts/open_web.py"
+        "scripts/open_frontend.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "查看 FastAPI 后端状态",
+      "type": "process",
+      "command": "python",
+      "args": [
+        "scripts/status_api.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "旧 Streamlit 调试（手动）",
+      "type": "process",
+      "command": "streamlit",
+      "args": [
+        "run",
+        "app.py"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

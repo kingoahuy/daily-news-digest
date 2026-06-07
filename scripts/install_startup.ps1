@@ -14,4 +14,4 @@ cd /d "$projectRoot"
 
 Set-Content -LiteralPath $launcherPath -Value $content -Encoding ASCII
 Write-Output "Startup launcher installed: $launcherPath"
-Write-Output "Streamlit and Next.js will be restored after the next Windows sign-in."
+Write-Output "FastAPI and Next.js will be restored after the next Windows sign-in."

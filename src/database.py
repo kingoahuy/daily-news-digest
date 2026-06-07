@@ -502,6 +502,18 @@ def get_news_items(
         return [dict(row) for row in rows]
 
 
+def get_news_item(
+    news_item_id: int,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> Optional[Dict[str, object]]:
+    with database_connection(db_path) as connection:
+        row = connection.execute(
+            "SELECT * FROM news_items WHERE id = ?",
+            (news_item_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def save_feedback(
     report_id: int,
     news_item_id: int,

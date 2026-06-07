@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 def main() -> int:
     exit_code = 0
-    for script in ("stop_frontend.py", "stop_web.py"):
+    for script in ("stop_frontend.py", "stop_api.py"):
         completed = subprocess.run(
             [sys.executable, str(PROJECT_ROOT / "scripts" / script)],
             cwd=PROJECT_ROOT,

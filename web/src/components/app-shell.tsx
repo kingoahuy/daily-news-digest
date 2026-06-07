@@ -4,8 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  Bookmark,
   BookOpenText,
   LayoutDashboard,
+  Sparkles,
   Radar,
   Settings,
 } from "lucide-react";
@@ -16,6 +18,8 @@ import { cn } from "@/lib/utils";
 const navigation = [
   { href: "/", label: "日报", icon: LayoutDashboard },
   { href: "/analytics", label: "分析", icon: BarChart3 },
+  { href: "/favorites", label: "收藏", icon: Bookmark },
+  { href: "/profile", label: "画像", icon: Sparkles },
   { href: "/settings", label: "设置", icon: Settings },
 ];
 
@@ -70,7 +74,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             前端预览版
           </div>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            当前使用独立 mock 数据，Python 抓取、邮件和 Actions 保持原样。
+            正在读取本机 SQLite。Python 抓取、邮件和 Actions 保持原样。
           </p>
         </div>
       </aside>
@@ -85,7 +89,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
           <div className="hidden items-center gap-2 text-xs text-muted-foreground lg:flex">
             <span className="size-1.5 rounded-full bg-emerald-500" />
-            Static preview · Backend untouched
+            Live local data · SQLite connected
           </div>
           <LanguageToggle />
         </header>
@@ -95,7 +99,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </main>
       </div>
 
-      <nav className="fixed inset-x-3 bottom-3 z-40 grid grid-cols-3 rounded-2xl border bg-background/92 p-1.5 shadow-[0_18px_60px_-18px_rgba(42,32,20,0.45)] backdrop-blur-xl lg:hidden">
+      <nav className="fixed inset-x-3 bottom-3 z-40 grid grid-cols-5 rounded-2xl border bg-background/92 p-1.5 shadow-[0_18px_60px_-18px_rgba(42,32,20,0.45)] backdrop-blur-xl lg:hidden">
         {navigation.map((item) => {
           const active =
             item.href === "/"

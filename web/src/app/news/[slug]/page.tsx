@@ -1,7 +1,4 @@
-import { notFound } from "next/navigation";
-
 import { ArticleDetail } from "@/components/article-detail";
-import { getArticle } from "@/data/mock-data";
 
 export default async function NewsDetailPage({
   params,
@@ -9,11 +6,9 @@ export default async function NewsDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const article = getArticle(slug);
-
-  if (!article) {
-    notFound();
+  const newsId = Number(slug);
+  if (!Number.isInteger(newsId) || newsId <= 0) {
+    return <ArticleDetail newsId={-1} />;
   }
-
-  return <ArticleDetail article={article} />;
+  return <ArticleDetail newsId={newsId} />;
 }

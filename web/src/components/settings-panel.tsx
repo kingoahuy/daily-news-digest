@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
-import { categories } from "@/data/mock-data";
+import { categories } from "@/data/category-data";
 import { cn } from "@/lib/utils";
 
 const languageOptions = [
@@ -51,10 +51,10 @@ export function SettingsPanel() {
   const [deliveryTime, setDeliveryTime] = useState("08:13");
   const [preferredLanguage, setPreferredLanguage] = useState("bilingual");
   const [summaryStyle, setSummaryStyle] = useState("concise");
-  const [saved, setSaved] = useState(false);
+  const [applied, setApplied] = useState(false);
 
   const toggleCategory = (key: (typeof categories)[number]["key"]) => {
-    setSaved(false);
+    setApplied(false);
     setSelectedCategories((current) =>
       current.includes(key)
         ? current.filter((item) => item !== key)
@@ -62,9 +62,9 @@ export function SettingsPanel() {
     );
   };
 
-  const save = () => {
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 2200);
+  const apply = () => {
+    setApplied(true);
+    window.setTimeout(() => setApplied(false), 2200);
   };
 
   return (
@@ -78,8 +78,8 @@ export function SettingsPanel() {
         </h1>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
           {zh
-            ? "设置会保存在当前页面状态中。接入后端后可写入现有 SQLite 配置。"
-            : "Settings currently live in page state. They can map to the existing SQLite configuration after backend integration."}
+            ? "这些阅读偏好当前只在本次浏览器会话中生效，不会修改 Python 邮件与生成配置。"
+            : "These reading preferences apply to the current browser session and do not change Python mail or generation settings."}
         </p>
       </header>
 
@@ -138,7 +138,7 @@ export function SettingsPanel() {
             checked={deliveryEnabled}
             onCheckedChange={(checked) => {
               setDeliveryEnabled(checked);
-              setSaved(false);
+              setApplied(false);
             }}
           />
         </div>
@@ -153,7 +153,7 @@ export function SettingsPanel() {
             disabled={!deliveryEnabled}
             onChange={(event) => {
               setDeliveryTime(event.target.value);
-              setSaved(false);
+              setApplied(false);
             }}
             className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:border-ring focus:ring-3 focus:ring-ring/20 disabled:opacity-45 sm:max-w-xs"
           />
@@ -173,7 +173,7 @@ export function SettingsPanel() {
               title={zh ? option.zh : option.en}
               onClick={() => {
                 setPreferredLanguage(option.value);
-                setSaved(false);
+                setApplied(false);
               }}
             />
           ))}
@@ -196,7 +196,7 @@ export function SettingsPanel() {
               description={zh ? option.zhDesc : option.enDesc}
               onClick={() => {
                 setSummaryStyle(option.value);
-                setSaved(false);
+                setApplied(false);
               }}
             />
           ))}
@@ -208,16 +208,16 @@ export function SettingsPanel() {
           size="lg"
           className="h-11 rounded-full px-5 shadow-lg"
           disabled={selectedCategories.length === 0}
-          onClick={save}
+          onClick={apply}
         >
-          {saved ? <Check className="size-4" /> : <Save className="size-4" />}
-          {saved
+          {applied ? <Check className="size-4" /> : <Save className="size-4" />}
+          {applied
             ? zh
-              ? "已保存 Mock 设置"
-              : "Mock settings saved"
+              ? "已应用本次会话"
+              : "Applied for this session"
             : zh
-              ? "保存设置"
-              : "Save preferences"}
+              ? "应用阅读偏好"
+              : "Apply preferences"}
         </Button>
       </div>
     </div>
