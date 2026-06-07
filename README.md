@@ -346,9 +346,9 @@ python -m src.main --dry-run --export-pages
 
 ## shadcn/ui 风格界面
 
-网页端仍然是 Python + Streamlit 项目，没有直接安装 `shadcn/ui`，也没有引入
-React、Next.js、npm、pnpm、Tailwind 编译或 shadcn CLI。当前版本只参考
-shadcn/ui 的设计语言和组件结构，通过 Streamlit 与 CSS 实现一致的视觉系统。
+原有 Python + Streamlit 页面继续保留，并通过 CSS 参考 shadcn/ui 的设计语言。
+正式的 Next.js + TypeScript + Tailwind CSS + shadcn/ui 前端现已作为独立的
+`web/` 子项目加入；两个界面可以同时运行，当前不会互相替换。
 
 统一设计系统位于 `src/ui_styles.py`，集中提供：
 
@@ -364,10 +364,90 @@ shadcn/ui 的设计语言和组件结构，通过 Streamlit 与 CSS 实现一致
 分类、AI 分数、重要性等级、点赞与收藏状态使用 Badge 展示；AI 分析与背景默认
 折叠，不会增加首屏阅读压力。
 
-这种方案保留了 Python + Streamlit 的低复杂度，后端、SQLite、邮件、互动、
-GitHub Actions 和新闻生成流程无需迁移。如果未来需要正式使用 shadcn/ui，
-建议单独建立 Next.js 前端，通过稳定的 API 访问现有 Python 服务和数据库，而
-不是在当前 Streamlit 项目中直接加入 React 构建流程。
+Streamlit 继续负责现有本地互动与设置，Next.js 先负责现代化静态阅读和分析
+原型。后端、SQLite、邮件、互动、GitHub Actions 和新闻生成流程均未迁移；
+后续可通过稳定 API 将 `web/` 接到现有 Python 能力。
+
+## Next.js 现代前端预览
+
+项目现在新增独立的 `web/` 前端，不替换 Streamlit，也不改动 Python 抓取、
+DeepSeek、邮件、SQLite 或 GitHub Actions 流程。当前版本使用静态 mock 数据，
+用于先确认页面结构和视觉体验，后续可通过 API 接入真实日报。
+
+技术栈：
+
+- Next.js App Router + TypeScript
+- Tailwind CSS
+- shadcn/ui
+- Recharts / shadcn Charts
+- 桌面侧栏与移动端底部导航
+
+页面：
+
+- `/`：今日新闻 Dashboard、核心议题、分类新闻和中英文切换
+- `/news/[slug]`：摘要、重要性、背景、相关链接和新手解释
+- `/analytics`：分类数量、重要新闻趋势和来源占比
+- `/settings`：关注分类、推送时间、语言和摘要风格 mock 设置
+
+安装依赖并运行开发模式：
+
+```powershell
+cd web
+npm install
+npm run dev
+```
+
+生产构建：
+
+```powershell
+cd web
+npm run lint
+npm run typecheck
+npm run build
+```
+
+项目提供独立守护器，默认在 `http://localhost:3000` 启动生产版本：
+
+```powershell
+python scripts/start_frontend.py
+python scripts/status_frontend.py
+python scripts/stop_frontend.py
+```
+
+同时启动 Streamlit 和 Next.js：
+
+```powershell
+python scripts/start_all.py
+```
+
+同时停止：
+
+```powershell
+python scripts/stop_all.py
+```
+
+VS Code 的文件夹打开任务会自动调用 `start_all.py`，重复执行不会启动重复的本
+项目进程。Next.js 与 Streamlit 都有独立状态文件和异常重启机制。
+
+### Windows 开机登录自启
+
+安装当前 Windows 用户的登录自启项：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/install_startup.ps1
+```
+
+它会在当前用户 Startup 目录写入 `DailyNewsDigest.cmd`。下次电脑开机并登录
+Windows 后，会自动恢复 Streamlit、Next.js 和已启用的本地邮件调度器。
+
+移除自启：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/uninstall_startup.ps1
+```
+
+本地网站在电脑关机期间无法访问；“开机自启”表示下次登录 Windows 后自动恢复。
+若需要电脑关机后仍可从互联网访问，需要把前端和后端部署到云服务器。
 
 ## 项目结构
 
