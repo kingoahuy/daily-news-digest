@@ -48,7 +48,7 @@ def export_pages(
         "",
         f"# {project_title} / Personal AI News Radar",
         "",
-        "这是自动生成的中英文双语新闻简报归档。内容来自 RSS 标题、摘要和原始链接，"
+        "这是自动生成的新闻简报归档。内容来自 RSS 标题、摘要和原始链接，"
         "不会抓取新闻全文。",
         "",
         "This is an automatically generated bilingual news digest archive. "

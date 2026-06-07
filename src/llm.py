@@ -7,45 +7,73 @@ from openai import OpenAI
 
 from src.config import Settings
 from src.models import NewsItem
-from src.ranker import extract_keywords
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROMPT_PATH = PROJECT_ROOT / "prompts" / "daily_report_prompt.txt"
 CATEGORY_NAMES = {
-    "technology": "三、科技动态 / Technology",
-    "finance": "四、财经动态 / Finance",
-    "sports": "五、体育运动 / Sports",
-    "society": "六、社会大事 / Society",
-    "politics": "七、政治事件 / Politics",
+    "technology": "科技动态",
+    "finance": "财经动态",
+    "sports": "体育运动",
+    "society": "社会动态",
+    "politics": "政治动态",
 }
 CATEGORY_ORDER = ["technology", "finance", "sports", "society", "politics"]
 
 
-def news_item_to_dict(item: NewsItem) -> Dict[str, object]:
-    """把 NewsItem 转成只包含 RSS 和本项目处理结果的 JSON。"""
+def trim_text(text: object, max_chars: int) -> str:
+    """压缩空白并按字符数截断模型输入。"""
 
-    return {
-        "title": item.title,
-        "summary": item.summary,
-        "url": item.url,
+    value = " ".join(str(text or "").split())
+    if len(value) <= max_chars:
+        return value
+    if max_chars <= 3:
+        return value[:max_chars]
+    return value[: max_chars - 3].rstrip() + "..."
+
+
+def sanitize_report(markdown: str) -> str:
+    """移除容易被误解为交易建议的措辞，并补充财经免责声明。"""
+
+    replacements = {
+        "投资者需关注": "后续需关注",
+        "投资者应关注": "后续应核验",
+        "投资风向标": "行业观察信号",
+        "投资机会": "行业变化",
+        "建议买入": "建议核验相关信息",
+        "建议卖出": "建议核验相关信息",
+        "建议配置": "建议持续跟踪",
+        "看涨": "预期上行",
+        "看跌": "预期下行",
+    }
+    cleaned = markdown
+    for source, target in replacements.items():
+        cleaned = cleaned.replace(source, target)
+    disclaimer = "> 财经内容仅作新闻信息摘要，不构成投资建议。"
+    if ("财经" in cleaned or "市场" in cleaned) and disclaimer not in cleaned:
+        cleaned = cleaned.rstrip() + "\n\n" + disclaimer + "\n"
+    return cleaned
+
+
+def news_item_to_dict(
+    item: NewsItem,
+    include_enrichment: bool = False,
+) -> Dict[str, object]:
+    """只保留日报生成真正需要的可追溯字段。"""
+
+    payload: Dict[str, object] = {
+        "title": trim_text(item.title, 180),
+        "summary": trim_text(item.summary, 300),
         "source": item.source,
         "category": item.category,
-        "subcategory": item.subcategory,
-        "keywords": sorted(extract_keywords(item)),
-        "published_at": item.published_at.isoformat() if item.published_at else None,
-        "rule_score": item.rule_score,
-        "ai_score": item.ai_score,
-        "ai_reason": item.ai_reason,
-        "ai_summary": item.ai_summary,
-        "ai_tags": item.ai_tags,
-        "importance_tier": item.importance_tier,
-        "final_score": item.score,
-        "preference_adjustment": item.preference_adjustment,
-        "cluster_id": item.cluster_id,
-        "cluster_title": item.cluster_title,
-        "enrichment": item.enrichment,
+        "url": item.url,
+        "ai_score": round(float(item.ai_score or item.rule_score), 2),
+        "ai_reason": trim_text(item.ai_reason, 160),
+        "ai_tags": [trim_text(tag, 30) for tag in item.ai_tags[:6]],
     }
+    if include_enrichment and item.enrichment:
+        payload["enrichment"] = item.enrichment
+    return payload
 
 
 def _date_text(report_date: Union[date, datetime, str]) -> str:
@@ -55,7 +83,7 @@ def _date_text(report_date: Union[date, datetime, str]) -> str:
 
 
 def _fact_text(item: NewsItem) -> str:
-    return item.ai_summary or item.summary or item.title
+    return trim_text(item.ai_summary or item.summary or item.title, 300)
 
 
 def _source_line(item: NewsItem) -> str:
@@ -67,48 +95,57 @@ def _enrichment_lines(item: NewsItem) -> List[str]:
     if not enrichment:
         return []
     labels = (
-        ("whats_new", "最新变化 / What's new"),
-        ("why_it_matters", "为何重要 / Why it matters"),
-        ("background", "背景 / Background"),
-        ("possible_impact", "可能影响 / Possible impact"),
+        ("whats_new", "最新变化"),
+        ("why_it_matters", "为何重要"),
+        ("background", "背景"),
+        ("possible_impact", "可能影响"),
     )
-    lines = []
+    lines: List[str] = []
     for key, label in labels:
-        value = str(enrichment.get(key, "")).strip()
+        value = trim_text(enrichment.get(key), 360)
         if value:
-            lines.extend([f"**{label}**", value, ""])
+            lines.append(f"- **{label}**：{value}")
     points = enrichment.get("follow_up_points") or []
     if points:
-        lines.append("**后续看点 / Follow-up points**")
-        lines.extend(f"- {point}" for point in points)
-        lines.append("")
+        lines.append(
+            "- **后续看点**："
+            + "；".join(trim_text(point, 120) for point in points[:3])
+        )
     return lines
 
 
-def _category_block(category: str, items: List[NewsItem]) -> List[str]:
-    lines = [f"## {CATEGORY_NAMES[category]}", ""]
+def _category_block(
+    category: str,
+    items: List[NewsItem],
+    bilingual: bool,
+) -> List[str]:
+    title = CATEGORY_NAMES.get(category, category)
+    if bilingual:
+        english = {
+            "technology": "Technology",
+            "finance": "Finance",
+            "sports": "Sports",
+            "society": "Society",
+            "politics": "Politics",
+        }.get(category, category)
+        title = f"{title} / {english}"
+    lines = [f"## {title}", ""]
     if not items:
-        return lines + [
-            "### 中文",
-            "今日该分类没有达到评分阈值的有效新闻。",
-            "",
-            "### English",
-            "No valid items in this category met today's score threshold.",
-            "",
-        ]
+        lines.extend(["今日没有达到评分阈值的新闻。", ""])
+        if bilingual:
+            lines.extend(["No item met today's score threshold.", ""])
+        return lines
 
     for item in items:
-        tags = " / ".join(item.ai_tags or sorted(extract_keywords(item))) or "未识别"
+        tags = "、".join(item.ai_tags[:6]) or "未标注"
         lines.extend(
             [
                 f"### {item.title}",
-                f"- **AI 分数 / AI score**：{item.ai_score:.2f}/10 "
-                f"({item.importance_tier})",
-                f"- **摘要 / Summary**：{_fact_text(item)}",
-                f"- **推荐理由 / Why selected**：{item.ai_reason}",
-                f"- **标签 / Tags**：{tags}",
-                f"- **主题簇 / Story cluster**：{item.cluster_title or item.title}",
-                f"- **来源 / Source**：{_source_line(item)}",
+                f"- **摘要**：{_fact_text(item)}",
+                f"- **AI 分数**：{item.ai_score:.1f}/10",
+                f"- **推荐理由**：{trim_text(item.ai_reason, 160)}",
+                f"- **标签**：{tags}",
+                f"- **来源**：{_source_line(item)}",
                 "",
             ]
         )
@@ -120,90 +157,109 @@ def build_fallback_report(
     grouped_news: Dict[str, List[NewsItem]],
     report_date: Union[date, datetime, str],
     radar_stats: Optional[Dict[str, object]] = None,
+    bilingual: bool = False,
 ) -> str:
-    """DeepSeek 不可用时仍输出完整的中英文双语新闻雷达。"""
+    """DeepSeek 不可用时输出短小、可追溯的本地简报。"""
 
     date_text = _date_text(report_date)
     stats = radar_stats or {}
     selected_count = sum(len(items) for items in grouped_news.values())
     filtered_count = int(stats.get("filtered_count", 0))
+    title = (
+        "每日热点新闻简报 / Daily News Digest"
+        if bilingual
+        else "每日热点新闻简报"
+    )
     lines = [
-        f"# 个人 AI 新闻雷达 / Personal AI News Radar｜{date_text}",
+        f"# {title}｜{date_text}",
         "",
-        (
-            f"> 中文：本期选择 {selected_count} 条主题代表新闻，"
-            f"过滤 {filtered_count} 条低分新闻。"
-        ),
-        (
-            f"> English: This edition selected {selected_count} representative "
-            f"stories and filtered {filtered_count} low-scoring items."
-        ),
+        f"> 本期精选 {selected_count} 条新闻，过滤 {filtered_count} 条低分主题。",
         "",
-        "## 一、今日重点 / Today's Highlights",
+        "## 今日重点" + (" / Today's Highlights" if bilingual else ""),
         "",
-        "### 中文",
-        f"本期最高优先级新闻是“{core_topic.title}”。"
-        "排序综合了规则分、AI 重要性分、跨来源主题聚类和个人偏好。",
-        "当前简报只使用 RSS 标题、摘要和链接，没有读取新闻全文。",
-        "",
-        "### English",
-        f'The highest-priority story is "{core_topic.title}". '
-        "Ranking combines rule-based signals, AI importance, cross-source "
-        "story clustering, and personal preferences.",
-        "This digest uses only RSS titles, summaries, and links; it does not "
-        "read full articles.",
-        "",
-        "## 二、核心新闻 / Core Stories",
-        "",
-        f"### {core_topic.title}",
-        f"- **AI 分数 / AI score**：{core_topic.ai_score:.2f}/10 "
-        f"({core_topic.importance_tier})",
-        f"- **摘要 / Summary**：{_fact_text(core_topic)}",
-        f"- **推荐理由 / Why selected**：{core_topic.ai_reason}",
-        f"- **来源 / Source**：{_source_line(core_topic)}",
-        "",
+        f"今日最值得关注的是“{core_topic.title}”。"
+        "排序综合了本地规则、AI 重要性、主题聚类和个人偏好。",
     ]
+    if bilingual:
+        lines.extend(
+            [
+                "",
+                f'Today\'s leading story is "{core_topic.title}". '
+                "Ranking combines local rules, AI importance, clustering, "
+                "and personal preferences.",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## 核心新闻" + (" / Core Story" if bilingual else ""),
+            "",
+            f"### {core_topic.title}",
+            f"- **发生了什么**：{_fact_text(core_topic)}",
+            f"- **为什么重要**：{trim_text(core_topic.ai_reason, 160)}",
+        ]
+    )
     lines.extend(_enrichment_lines(core_topic))
+    lines.extend([f"- **来源**：{_source_line(core_topic)}", ""])
 
     for category in CATEGORY_ORDER:
-        lines.extend(_category_block(category, grouped_news.get(category, [])))
+        lines.extend(
+            _category_block(
+                category,
+                grouped_news.get(category, []),
+                bilingual,
+            )
+        )
 
     lines.extend(
         [
-            "## 八、今日观察 / Daily Observations",
+            "## 今日观察" + (" / Daily Observation" if bilingual else ""),
             "",
-            "### 中文",
-            "多来源主题会获得额外关注，但多来源出现本身不等于事实已完全确认。"
-            "摘要信息有限的条目只保留可追溯事实。",
+            "高分主题优先进入简报，多来源报道会获得额外权重。"
+            "当前内容仅依据 RSS 标题、摘要和链接，不代表已核验新闻全文。"
+            "政治内容保持中立，财经内容不构成投资建议。",
             "",
-            "### English",
-            "Stories covered by multiple sources receive additional attention, "
-            "but repeated coverage alone does not fully verify a claim. Items "
-            "with limited summaries retain only traceable facts.",
-            "",
-            "## 九、我的关注建议 / Personal Follow-up",
+            "## 我的关注建议" + (" / Follow-up" if bilingual else ""),
             "",
         ]
     )
-    for label_zh, label_en, category in (
-        ("科技", "Technology", "technology"),
-        ("财经", "Finance", "finance"),
-        ("体育", "Sports", "sports"),
-    ):
+    suggestions = sorted(
+        (
+            item
+            for items in grouped_news.values()
+            for item in items
+        ),
+        key=lambda item: item.score,
+        reverse=True,
+    )[:3]
+    lines.extend(
+        f"- 后续关注 [{item.title}]({item.url}) 的可靠更新。"
+        for item in suggestions
+    )
+    return sanitize_report("\n".join(lines).strip()) + "\n"
+
+
+def _limited_grouped_news(
+    grouped_news: Dict[str, List[NewsItem]],
+    max_total: int,
+) -> Dict[str, List[NewsItem]]:
+    limited: Dict[str, List[NewsItem]] = {}
+    remaining = max_total
+    for category in CATEGORY_ORDER:
+        if remaining <= 0:
+            break
         items = grouped_news.get(category, [])
         if items:
-            item = items[0]
-            lines.append(
-                f"- **{label_zh} / {label_en}**："
-                f"[{item.title}]({item.url})"
-            )
-        else:
-            lines.append(
-                f"- **{label_zh} / {label_en}**："
-                "今日无高分条目 / No high-scoring item today."
-            )
-
-    return "\n".join(lines).strip() + "\n"
+            limited[category] = items[:remaining]
+            remaining -= len(limited[category])
+    for category, items in grouped_news.items():
+        if remaining <= 0:
+            break
+        if category in limited or not items:
+            continue
+        limited[category] = items[:remaining]
+        remaining -= len(limited[category])
+    return limited
 
 
 def generate_daily_report(
@@ -216,39 +272,50 @@ def generate_daily_report(
     clusters: Optional[List[Dict[str, object]]] = None,
     radar_stats: Optional[Dict[str, object]] = None,
 ) -> str:
-    """调用 DeepSeek 生成双语简报；异常时退回双语本地模板。"""
+    """调用 DeepSeek 生成精简日报；异常时退回本地模板。"""
+
+    del preference_profile, clusters
+    bilingual = bool(
+        settings.filtering.get("enable_bilingual_report", False)
+    )
+    max_total = max(
+        1,
+        int(settings.filtering.get("max_total_news", 12)),
+    )
+    max_top = max(
+        1,
+        int(settings.filtering.get("max_top_news", 8)),
+    )
+    limited_grouped = _limited_grouped_news(grouped_news, max_total)
+    stats = radar_stats or {}
+    compact_stats = {
+        key: stats.get(key, 0)
+        for key in (
+            "fetched_count",
+            "deduplicated_count",
+            "eligible_count",
+            "filtered_count",
+            "selected_count",
+        )
+    }
 
     try:
         prompt = PROMPT_PATH.read_text(encoding="utf-8")
-        profile = preference_profile or {}
         payload = {
             "report_date": _date_text(report_date),
-            "core_topic": news_item_to_dict(core_topic),
+            "language_mode": "bilingual" if bilingual else "zh-CN",
+            "core_topic": news_item_to_dict(
+                core_topic,
+                include_enrichment=True,
+            ),
             "grouped_news": {
                 category: [news_item_to_dict(item) for item in items]
-                for category, items in grouped_news.items()
+                for category, items in limited_grouped.items()
             },
-            "top_news": [news_item_to_dict(item) for item in top_news],
-            "story_clusters": clusters or [],
-            "radar_stats": radar_stats or {},
-            "user_preferences": {
-                "user_profile": profile.get("user_profile", {}),
-                "category_weights": profile.get("category_weights", {}),
-                "subcategory_weights": profile.get("subcategory_weights", {}),
-                "feedback_count": profile.get("feedback_count", 0),
-                "category_averages": profile.get("category_averages", {}),
-                "keyword_averages": profile.get("keyword_averages", {}),
-                "interaction_count": profile.get("interaction_count", 0),
-                "interaction_category_adjustments": profile.get(
-                    "interaction_category_adjustments", {}
-                ),
-                "interaction_keyword_adjustments": profile.get(
-                    "interaction_keyword_adjustments", {}
-                ),
-                "interaction_source_adjustments": profile.get(
-                    "interaction_source_adjustments", {}
-                ),
-            },
+            "top_news": [
+                news_item_to_dict(item) for item in top_news[:max_top]
+            ],
+            "radar_stats": compact_stats,
         }
 
         client = OpenAI(
@@ -257,6 +324,9 @@ def generate_daily_report(
             timeout=120.0,
             max_retries=1,
         )
+        language_request = (
+            "中英文双语精简版" if bilingual else "中文精简版"
+        )
         response = client.chat.completions.create(
             model=settings.deepseek_model,
             messages=[
@@ -264,8 +334,8 @@ def generate_daily_report(
                 {
                     "role": "user",
                     "content": (
-                        "请根据以下数据生成中英文双语 AI 新闻雷达：\n"
-                        + json.dumps(payload, ensure_ascii=False, indent=2)
+                        f"请根据以下数据生成{language_request}新闻简报：\n"
+                        + json.dumps(payload, ensure_ascii=False)
                     ),
                 },
             ],
@@ -275,15 +345,16 @@ def generate_daily_report(
         content = response.choices[0].message.content
         if not content or not content.strip():
             raise RuntimeError("DeepSeek 返回了空内容。")
-        return content.strip() + "\n"
+        return sanitize_report(content.strip()) + "\n"
     except Exception as exc:
         print(
             "警告：DeepSeek 日报生成失败"
-            f"（{type(exc).__name__}），将生成本地双语 fallback 简报。"
+            f"（{type(exc).__name__}），将生成本地 fallback 简报。"
         )
         return build_fallback_report(
             core_topic,
-            grouped_news,
+            limited_grouped,
             report_date,
             radar_stats=radar_stats,
+            bilingual=bilingual,
         )

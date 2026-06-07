@@ -37,7 +37,7 @@ def format_and_save_report(
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <title>{escape(f"个人 AI 新闻雷达 / Personal AI News Radar｜{date_text}")}</title>
+  <title>{escape(f"每日热点新闻简报｜{date_text}")}</title>
   <style>
     h1, h2, h3 {{ line-height: 1.35; margin: 1.4em 0 0.55em; }}
     p {{ margin: 0.75em 0; }}
@@ -46,8 +46,8 @@ def format_and_save_report(
     a {{ color: #175cd3; }}
   </style>
 </head>
-<body style="margin:0;background:#f4f6f8;color:#202124;font-family:Arial,'Microsoft YaHei',sans-serif;line-height:1.7;">
-  <div style="max-width:760px;margin:24px auto;padding:28px;background:#ffffff;border-radius:8px;">
+<body style="margin:0;background:#f5f5f7;color:#1d1d1f;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei','Segoe UI',sans-serif;line-height:1.7;">
+  <div style="max-width:760px;margin:24px auto;padding:28px;background:#ffffff;border-radius:20px;">
     <div style="font-size:16px;">
       {body}
     </div>

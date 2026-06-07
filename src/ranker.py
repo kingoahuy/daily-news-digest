@@ -265,6 +265,7 @@ def rank_news(
     settings: Settings,
     preference_profile: Optional[Dict[str, object]] = None,
     clusters: Optional[List[StoryCluster]] = None,
+    keyword_map: Optional[Dict[str, List[str]]] = None,
 ) -> Dict[str, object]:
     """综合规则分、AI 分、主题簇和历史反馈完成最终排序。"""
 
@@ -274,7 +275,7 @@ def rank_news(
         )
 
     profile = preference_profile or _load_profile(settings)
-    keyword_map = score_news_by_rules(items, settings)
+    keyword_map = keyword_map or score_news_by_rules(items, settings)
     cluster_map = {
         cluster.cluster_id: cluster for cluster in (clusters or [])
     }
@@ -298,7 +299,6 @@ def rank_news(
         item.preference_adjustment = round(personalized - base_score, 3)
         item.score = personalized
 
-    grouped_news: Dict[str, List[NewsItem]] = {}
     categories = list(DEFAULT_CATEGORY_WEIGHTS)
     categories.extend(
         sorted(
@@ -322,6 +322,19 @@ def rank_news(
             reverse=True,
         )[:1]
 
+    max_per_category = max(
+        1,
+        int(settings.filtering.get("max_items_per_category", 3)),
+    )
+    max_total_news = max(
+        1,
+        int(settings.filtering.get("max_total_news", 12)),
+    )
+    max_top_news = max(
+        1,
+        int(settings.filtering.get("max_top_news", 8)),
+    )
+    candidates_by_category: Dict[str, List[NewsItem]] = {}
     for category in categories:
         category_items = sorted(
             (item for item in eligible if item.category == category),
@@ -333,18 +346,54 @@ def rank_news(
             reverse=True,
         )
         if category_items:
-            grouped_news[category] = category_items[
-                : settings.max_news_per_category
-            ]
+            candidates_by_category[category] = category_items
 
-    selected_items = [
-        item for category_items in grouped_news.values() for item in category_items
-    ]
+    selected_items: List[NewsItem] = []
+    selected_urls = set()
+    category_counts = {category: 0 for category in categories}
+
+    # 先为每个有高分条目的分类保留一条，再按综合分补足总量。
+    for category in categories:
+        category_items = candidates_by_category.get(category, [])
+        if not category_items or len(selected_items) >= max_total_news:
+            continue
+        item = category_items[0]
+        selected_items.append(item)
+        selected_urls.add(item.url)
+        category_counts[category] += 1
+
+    for item in sorted(eligible, key=lambda row: row.score, reverse=True):
+        if len(selected_items) >= max_total_news:
+            break
+        if item.url in selected_urls:
+            continue
+        if category_counts.get(item.category, 0) >= max_per_category:
+            continue
+        selected_items.append(item)
+        selected_urls.add(item.url)
+        category_counts[item.category] = (
+            category_counts.get(item.category, 0) + 1
+        )
+
+    grouped_news: Dict[str, List[NewsItem]] = {}
+    for category in categories:
+        category_items = sorted(
+            (
+                item
+                for item in selected_items
+                if item.category == category
+            ),
+            key=lambda item: item.score,
+            reverse=True,
+        )
+        if category_items:
+            grouped_news[category] = category_items
+
     top_news = sorted(
         selected_items,
         key=lambda item: item.score,
         reverse=True,
-    )[:15]
+    )[:max_top_news]
     if not top_news:
         raise ValueError("评分过滤后没有可用于生成日报的新闻。")
     core_topic = top_news[0]
@@ -373,6 +422,7 @@ def rank_news(
         "filtered_count": len(representatives) - len(eligible),
         "eligible_count": len(eligible),
         "representative_count": len(representatives),
+        "selected_count": len(selected_items),
         "category_averages": category_averages,
         "preference_impact": {
             "average_adjustment": round(

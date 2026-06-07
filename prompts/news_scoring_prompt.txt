@@ -29,12 +29,12 @@
   {
     "id": "输入新闻的 id",
     "ai_score": 8.5,
-    "ai_reason": "简明中文推荐理由。\nConcise English reason.",
-    "ai_summary": "基于标题和摘要写成的 1-2 句中文摘要。\nA 1-2 sentence English summary based on the input.",
+    "ai_reason": "简明中文推荐理由。",
+    "ai_summary": "基于标题和摘要写成的 1-2 句中文摘要。",
     "ai_tags": ["AI", "半导体", "美股"],
     "importance_tier": "high"
   }
 ]
 
 importance_tier 只能是 high、medium、low、noise。
-ai_reason 和 ai_summary 必须同时包含简体中文和英文，并用换行分隔。
+ai_reason 和 ai_summary 默认只使用简体中文，保持简洁。

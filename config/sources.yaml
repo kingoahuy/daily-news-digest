@@ -11,7 +11,7 @@ sources:
       enabled: true
     - name: "Ars Technica"
       url: "https://feeds.arstechnica.com/arstechnica/index"
-      enabled: true
+      enabled: false
 
   finance:
     - name: "CNA Business"
@@ -53,7 +53,7 @@ sources:
       enabled: true
     - name: "CNA Singapore"
       url: "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=10416"
-      enabled: true
+      enabled: false
     - name: "BBC Top Stories"
       url: "https://feeds.bbci.co.uk/news/rss.xml"
       enabled: true
@@ -64,7 +64,7 @@ sources:
       enabled: true
     - name: "CNA Asia"
       url: "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6511"
-      enabled: true
+      enabled: false
     - name: "BBC World"
       url: "https://feeds.bbci.co.uk/news/world/rss.xml"
       enabled: true

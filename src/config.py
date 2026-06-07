@@ -70,6 +70,21 @@ def _project_path(name: str, default: Path) -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
+def _source_config_path() -> Path:
+    explicit = _get_env("SOURCES_PATH")
+    if explicit:
+        path = Path(explicit).expanduser()
+        return path if path.is_absolute() else PROJECT_ROOT / path
+
+    v4_default = PROJECT_ROOT / "config" / "sources.yaml"
+    if v4_default.exists():
+        return v4_default
+    return _project_path(
+        "FEEDS_PATH",
+        PROJECT_ROOT / "config" / "feeds.yaml",
+    )
+
+
 def _load_yaml(path: Path, label: str) -> Dict[str, Any]:
     if not path.exists():
         return {}
@@ -101,6 +116,25 @@ def _configured_int(
     if value <= 0:
         raise ConfigError(f"{env_name}/{config_key} 必须大于 0。")
     return value
+
+
+def _missing_settings_message(missing: list[str]) -> str:
+    lines = [
+        "缺少以下必要配置：",
+        *(f"- {name}" for name in missing),
+        "",
+        "本地运行：请在项目根目录的 .env 中配置。",
+        "GitHub Actions：请进入仓库 Settings -> Secrets and variables "
+        "-> Actions -> New repository secret，逐项添加同名 Secret。",
+    ]
+    if "DEEPSEEK_API_KEY" in missing:
+        lines.append("DEEPSEEK_API_KEY 应填写有效的 DeepSeek API Key。")
+    if "SMTP_PASSWORD" in missing:
+        lines.append(
+            "SMTP_PASSWORD 应填写邮箱 SMTP 授权码，不是邮箱网页登录密码。"
+        )
+    lines.append("安全提示：程序不会打印 Secret 的真实内容。")
+    return "\n".join(lines)
 
 
 def load_settings(
@@ -145,10 +179,7 @@ def load_settings(
 
     missing = [name for name, value in required_values.items() if not value]
     if missing:
-        names = "、".join(missing)
-        raise ConfigError(
-            f"缺少 {names}，请在 .env 或 GitHub Secrets 中配置。"
-        )
+        raise ConfigError(_missing_settings_message(missing))
 
     timezone_name = _get_env(
         "TIMEZONE",
@@ -180,24 +211,18 @@ def load_settings(
             "MAX_NEWS_PER_CATEGORY",
             filtering,
             "max_items_per_category",
-            6,
+            3,
         ),
         news_lookback_hours=_configured_int(
             "NEWS_LOOKBACK_HOURS",
             filtering,
             "time_window_hours",
-            36,
+            24,
         ),
         database_path=_project_path(
             "DATABASE_PATH", PROJECT_ROOT / "data" / "news_digest.db"
         ),
-        feeds_path=_project_path(
-            "SOURCES_PATH",
-            _project_path(
-                "FEEDS_PATH",
-                PROJECT_ROOT / "config" / "sources.yaml",
-            ),
-        ),
+        feeds_path=_source_config_path(),
         preferences_path=_project_path(
             "PREFERENCES_PATH", PROJECT_ROOT / "config" / "preferences.yaml"
         ),

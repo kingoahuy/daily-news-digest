@@ -4,6 +4,6 @@ timezone: "Asia/Singapore"
 report_languages:
   - "zh-CN"
   - "en"
-report_format: "bilingual"
+report_format: "configurable"
 database_path_env: "DATABASE_PATH"
 preferences_path_env: "PREFERENCES_PATH"

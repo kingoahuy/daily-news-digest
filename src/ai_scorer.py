@@ -43,12 +43,15 @@ def _fallback(item: NewsItem, reason: str) -> None:
     fact = item.summary or item.title
     item.ai_score = score
     item.ai_reason = reason
-    item.ai_summary = (
-        f"中文：当前仅保留 RSS 提供的原始摘要：{fact}\n"
-        f"English: The available RSS summary is: {fact}"
-    )
+    item.ai_summary = fact
     item.ai_tags = []
     item.importance_tier = importance_tier(score)
+
+
+def apply_rule_only_score(item: NewsItem) -> None:
+    """为未进入 AI 候选池的新闻保留可解释的本地规则分。"""
+
+    _fallback(item, "未进入 AI 精评，使用本地规则评分。")
 
 
 def _extract_json_array(content: str) -> List[Dict[str, object]]:
@@ -76,7 +79,7 @@ def _payload(items: Iterable[NewsItem]) -> List[Dict[str, object]]:
         {
             "id": _item_id(item),
             "title": item.title,
-            "summary": item.summary,
+            "summary": (item.summary or "")[:500],
             "source": item.source,
             "category": item.category,
             "published_at": (
@@ -99,8 +102,7 @@ def _apply_results(
         if not row:
             _fallback(
                 item,
-                "AI 未返回该条结果，已使用规则评分。\n"
-                "AI returned no result for this item; the rule-based score is used.",
+                "AI 未返回该条结果，已使用规则评分。",
             )
             continue
         score = _clamp_score(row.get("ai_score"))
@@ -120,7 +122,8 @@ def _apply_results(
         if not item.ai_reason:
             item.ai_reason = "AI 已完成评分，但没有返回推荐理由。"
         if not item.ai_summary:
-            item.ai_summary = item.summary or item.title
+            fact = item.summary or item.title
+            item.ai_summary = fact
         applied += 1
     return applied
 
@@ -128,7 +131,7 @@ def _apply_results(
 def score_news_with_ai(
     items: List[NewsItem],
     settings: Settings,
-) -> Dict[str, int]:
+) -> Dict[str, object]:
     """批量执行重要性评分；任何失败都回退到规则分。"""
 
     if not items:
@@ -140,11 +143,9 @@ def score_news_with_ai(
     max_retries = max(1, min(int(filtering.get("ai_max_retries", 3)), 3))
     if not enabled or not settings.deepseek_api_key:
         reason = (
-            "AI 评分已关闭，使用规则评分。\n"
-            "AI scoring is disabled; the rule-based score is used."
+            "AI 评分已关闭，使用规则评分。"
             if not enabled
-            else "未配置 DeepSeek API Key，使用规则评分。\n"
-            "The DeepSeek API key is not configured; the rule-based score is used."
+            else "未配置 DeepSeek API Key，使用规则评分。"
         )
         for item in items:
             _fallback(item, reason)
@@ -203,8 +204,7 @@ def score_news_with_ai(
             for item in batch:
                 _fallback(
                     item,
-                    "AI 批次评分失败，已使用规则评分。\n"
-                    "The AI scoring batch failed; the rule-based score is used.",
+                    "AI 批次评分失败，已使用规则评分。",
                 )
 
     fallback = len(items) - ai_scored

@@ -42,23 +42,18 @@ def _parse_json_object(content: str) -> Dict[str, object]:
 
 def _fallback_enrichment(item: NewsItem) -> Dict[str, object]:
     fact = item.ai_summary or item.summary or item.title
-    insufficient_zh = "根据当前摘要信息，暂不能判断更多细节。"
-    insufficient_en = (
-        "Based on the available summary, further details cannot yet be determined."
-    )
+    insufficient = "根据当前摘要信息，暂不能判断更多细节。"
     return {
-        "whats_new": f"当前 RSS 信息显示：{fact}\nThe RSS information states: {fact}",
-        "why_it_matters": f"{insufficient_zh}\n{insufficient_en}",
-        "background": f"{insufficient_zh}\n{insufficient_en}",
+        "whats_new": f"当前 RSS 信息显示：{fact}",
+        "why_it_matters": insufficient,
+        "background": insufficient,
         "possible_impact": (
             "可能影响仍需后续可靠来源确认；财经内容不构成投资建议。"
-            "\nPotential impacts require confirmation from reliable follow-up "
-            "sources; financial content is not investment advice."
         ),
         "follow_up_points": [
-            "是否有更多独立来源确认？\nWill more independent sources confirm it?",
-            "相关机构是否发布正式信息？\nWill relevant organizations issue official information?",
-            "后续是否出现可核实的影响？\nWill verifiable impacts emerge?",
+            "是否有更多独立来源确认？",
+            "相关机构是否发布正式信息？",
+            "后续是否出现可核实的影响？",
         ],
         "fallback": True,
     }
@@ -86,7 +81,7 @@ def enrich_core_news(
     settings: Settings,
     clusters: Optional[List[StoryCluster]] = None,
 ) -> Dict[str, int]:
-    """只补充最重要的 1-3 条新闻，失败时保存保守的双语 fallback。"""
+    """只补充最重要的 1-3 条新闻，失败时保存保守 fallback。"""
 
     if not items:
         return {"selected": 0, "enriched": 0, "fallback": 0}
@@ -97,6 +92,10 @@ def enrich_core_news(
 
     limit = max(1, min(int(filtering.get("max_enriched_items", 3)), 3))
     threshold = float(filtering.get("core_topic_threshold", 7.5))
+    max_retries = max(
+        1,
+        min(int(filtering.get("ai_max_retries", 2)), 3),
+    )
     candidates = [item for item in items if item.ai_score >= threshold][:limit]
     if not candidates:
         candidates = items[:1]
@@ -126,7 +125,7 @@ def enrich_core_news(
         cluster = cluster_map.get(item.cluster_id)
         payload = {
             "title": item.title,
-            "summary": item.summary,
+            "summary": (item.summary or "")[:500],
             "source": item.source,
             "url": item.url,
             "category": item.category,
@@ -134,9 +133,6 @@ def enrich_core_news(
                 item.published_at.isoformat() if item.published_at else None
             ),
             "ai_score": item.ai_score,
-            "ai_reason": item.ai_reason,
-            "ai_summary": item.ai_summary,
-            "ai_tags": item.ai_tags,
             "cluster_sources": cluster.sources if cluster else [item.source],
             "related_titles": (
                 [related.title for related in cluster.related_items]
@@ -145,7 +141,7 @@ def enrich_core_news(
             ),
         }
         completed = False
-        for attempt in range(1, 4):
+        for attempt in range(1, max_retries + 1):
             try:
                 response = client.chat.completions.create(
                     model=settings.deepseek_model,
@@ -160,7 +156,7 @@ def enrich_core_news(
                             ),
                         },
                     ],
-                    temperature=0.15,
+                    temperature=0.0,
                     stream=False,
                 )
                 content = response.choices[0].message.content or ""
@@ -175,7 +171,7 @@ def enrich_core_news(
                     f"警告：核心新闻背景补充第 {attempt} 次失败"
                     f"（{type(exc).__name__}）。"
                 )
-                if attempt < 3:
+                if attempt < max_retries:
                     time.sleep(min(2 ** (attempt - 1), 4))
         if not completed:
             item.enrichment = _fallback_enrichment(item)

@@ -5,6 +5,19 @@ on:
     - cron: "13 8 * * *"
       timezone: "Asia/Singapore"
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "运行模式"
+        required: true
+        default: "send"
+        type: choice
+        options:
+          - dry-run
+          - send
+
+concurrency:
+  group: daily-news-digest-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-and-send:
@@ -26,8 +39,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run daily news digest
+      - name: Preflight check
         env:
+          ACTIONS_RUN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'send' }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
           DEEPSEEK_MODEL: ${{ secrets.DEEPSEEK_MODEL }}
@@ -41,14 +55,40 @@ jobs:
           MAX_NEWS_PER_CATEGORY: ${{ secrets.MAX_NEWS_PER_CATEGORY }}
           NEWS_LOOKBACK_HOURS: ${{ secrets.NEWS_LOOKBACK_HOURS }}
         run: |
-          if [ "${{ vars.ENABLE_GITHUB_PAGES }}" = "true" ]; then
-            python -m src.main --send --export-pages
+          set -o pipefail
+          mkdir -p logs
+          python scripts/check_actions_env.py --mode "$ACTIONS_RUN_MODE" 2>&1 | tee logs/preflight.log
+
+      - name: Run daily news digest
+        env:
+          ACTIONS_RUN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'send' }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
+          DEEPSEEK_MODEL: ${{ secrets.DEEPSEEK_MODEL }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          TIMEZONE: ${{ secrets.TIMEZONE }}
+          MAX_NEWS_PER_CATEGORY: ${{ secrets.MAX_NEWS_PER_CATEGORY }}
+          NEWS_LOOKBACK_HOURS: ${{ secrets.NEWS_LOOKBACK_HOURS }}
+        run: |
+          set -o pipefail
+          mkdir -p logs
+          if [ "$ACTIONS_RUN_MODE" = "dry-run" ]; then
+            python -m src.main --dry-run 2>&1 | tee logs/actions_run.log
+          elif [ "${{ vars.ENABLE_GITHUB_PAGES }}" = "true" ]; then
+            python -m src.main --send --export-pages 2>&1 | tee logs/actions_run.log
           else
-            python -m src.main --send
+            python -m src.main --send 2>&1 | tee logs/actions_run.log
           fi
 
       - name: Commit generated Pages archive
-        if: vars.ENABLE_GITHUB_PAGES == 'true'
+        if: >-
+          vars.ENABLE_GITHUB_PAGES == 'true' &&
+          (github.event_name != 'workflow_dispatch' || inputs.mode == 'send')
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -56,16 +96,20 @@ jobs:
           if git diff --cached --quiet; then
             echo "No docs changes to commit."
           else
-            git commit -m "docs: publish bilingual news radar"
+            git commit -m "docs: publish news radar archive"
             git push
           fi
 
       - name: Configure GitHub Pages
-        if: vars.ENABLE_GITHUB_PAGES == 'true'
+        if: >-
+          vars.ENABLE_GITHUB_PAGES == 'true' &&
+          (github.event_name != 'workflow_dispatch' || inputs.mode == 'send')
         uses: actions/configure-pages@v5
 
       - name: Upload GitHub Pages artifact
-        if: vars.ENABLE_GITHUB_PAGES == 'true'
+        if: >-
+          vars.ENABLE_GITHUB_PAGES == 'true' &&
+          (github.event_name != 'workflow_dispatch' || inputs.mode == 'send')
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs
@@ -79,8 +123,19 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      - name: Upload action logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: action-logs-${{ github.run_id }}
+          path: logs/*.log
+          if-no-files-found: ignore
+          retention-days: 14
+
   deploy-pages:
-    if: vars.ENABLE_GITHUB_PAGES == 'true'
+    if: >-
+      vars.ENABLE_GITHUB_PAGES == 'true' &&
+      (github.event_name != 'workflow_dispatch' || inputs.mode == 'send')
     needs: build-and-send
     runs-on: ubuntu-latest
     permissions:

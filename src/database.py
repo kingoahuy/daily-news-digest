@@ -16,6 +16,15 @@ DEFAULT_EMAIL_SETTINGS = {
     "timezone": "Asia/Singapore",
     "auto_send_local_enabled": "false",
 }
+DEFAULT_GENERATION_SETTINGS = {
+    "low_api_mode": "true",
+    "max_total_news": "12",
+    "max_items_per_category": "3",
+    "pre_ai_prefilter_limit": "40",
+    "enable_bilingual_report": "false",
+    "enable_enrichment": "true",
+    "max_enriched_items": "1",
+}
 
 
 def _utc_now_text() -> str:
@@ -254,6 +263,17 @@ def initialize_database(
         "email_send_time": "本地每日邮件发送时间",
         "timezone": "本地邮件调度时区",
         "auto_send_local_enabled": "是否启用本地自动发送",
+        "low_api_mode": "是否启用省 API 模式",
+        "max_total_news": "每期日报最多新闻数",
+        "max_items_per_category": "每个分类最多新闻数",
+        "pre_ai_prefilter_limit": "进入 AI 精评的候选新闻数",
+        "enable_bilingual_report": "是否生成中英文双语日报",
+        "enable_enrichment": "是否启用核心新闻背景补充",
+        "max_enriched_items": "每期最多背景补充新闻数",
+    }
+    default_settings = {
+        **DEFAULT_EMAIL_SETTINGS,
+        **DEFAULT_GENERATION_SETTINGS,
     }
     connection.executemany(
         """
@@ -264,7 +284,7 @@ def initialize_database(
         """,
         [
             (key, value, descriptions[key], now)
-            for key, value in DEFAULT_EMAIL_SETTINGS.items()
+            for key, value in default_settings.items()
         ],
     )
 
@@ -912,6 +932,103 @@ def save_email_settings(
         "email_send_time": email_send_time,
         "timezone": timezone_name,
         "auto_send_local_enabled": str(bool(auto_send_local_enabled)).lower(),
+    }
+    for key, value in values.items():
+        set_setting(key, value, descriptions[key], db_path)
+
+
+def get_generation_settings(
+    defaults: Optional[Dict[str, object]] = None,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> Dict[str, object]:
+    configured = defaults or {}
+
+    def default_text(key: str) -> str:
+        value = configured.get(key, DEFAULT_GENERATION_SETTINGS[key])
+        return str(value).lower() if isinstance(value, bool) else str(value)
+
+    return {
+        "low_api_mode": _as_bool(
+            get_setting("low_api_mode", default_text("low_api_mode"), db_path)
+        ),
+        "max_total_news": int(
+            get_setting(
+                "max_total_news",
+                default_text("max_total_news"),
+                db_path,
+            )
+        ),
+        "max_items_per_category": int(
+            get_setting(
+                "max_items_per_category",
+                default_text("max_items_per_category"),
+                db_path,
+            )
+        ),
+        "pre_ai_prefilter_limit": int(
+            get_setting(
+                "pre_ai_prefilter_limit",
+                default_text("pre_ai_prefilter_limit"),
+                db_path,
+            )
+        ),
+        "enable_bilingual_report": _as_bool(
+            get_setting(
+                "enable_bilingual_report",
+                default_text("enable_bilingual_report"),
+                db_path,
+            )
+        ),
+        "enable_enrichment": _as_bool(
+            get_setting(
+                "enable_enrichment",
+                default_text("enable_enrichment"),
+                db_path,
+            )
+        ),
+        "max_enriched_items": int(
+            get_setting(
+                "max_enriched_items",
+                default_text("max_enriched_items"),
+                db_path,
+            )
+        ),
+    }
+
+
+def save_generation_settings(
+    low_api_mode: bool,
+    max_total_news: int,
+    max_items_per_category: int,
+    pre_ai_prefilter_limit: int,
+    enable_bilingual_report: bool,
+    enable_enrichment: bool,
+    max_enriched_items: int,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> None:
+    descriptions = {
+        "low_api_mode": "是否启用省 API 模式",
+        "max_total_news": "每期日报最多新闻数",
+        "max_items_per_category": "每个分类最多新闻数",
+        "pre_ai_prefilter_limit": "进入 AI 精评的候选新闻数",
+        "enable_bilingual_report": "是否生成中英文双语日报",
+        "enable_enrichment": "是否启用核心新闻背景补充",
+        "max_enriched_items": "每期最多背景补充新闻数",
+    }
+    values = {
+        "low_api_mode": str(bool(low_api_mode)).lower(),
+        "max_total_news": str(max(1, int(max_total_news))),
+        "max_items_per_category": str(
+            max(1, int(max_items_per_category))
+        ),
+        "pre_ai_prefilter_limit": str(
+            max(1, int(pre_ai_prefilter_limit))
+        ),
+        "enable_bilingual_report": str(
+            bool(enable_bilingual_report)
+        ).lower(),
+        "enable_enrichment": str(bool(enable_enrichment)).lower(),
+        "max_enriched_items": str(max(1, int(max_enriched_items))),
     }
     for key, value in values.items():
         set_setting(key, value, descriptions[key], db_path)
