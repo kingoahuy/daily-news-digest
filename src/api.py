@@ -5,7 +5,7 @@ from typing import Dict, List
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from src.config import load_settings
 from src.database import (
@@ -17,8 +17,10 @@ from src.database import (
     get_news_comments,
     get_news_item,
     get_news_items,
+    get_user_settings,
     initialize_database,
     list_reports,
+    save_user_settings,
     toggle_favorite,
     toggle_like,
 )
@@ -45,7 +47,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):30\d{2}$",
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
     allow_headers=["Content-Type"],
 )
 
@@ -60,6 +62,36 @@ class CommentCreate(BaseModel):
         if not content:
             raise ValueError("评论内容不能为空")
         return content
+
+
+class UserSettingsUpdate(BaseModel):
+    email_enabled: bool
+    email_send_time: str
+    low_api_mode: bool
+    max_total_news: int = Field(ge=1, le=100)
+    max_items_per_category: int = Field(ge=1, le=30)
+    enable_bilingual_report: bool
+    enable_enrichment: bool
+
+    @field_validator("email_send_time")
+    @classmethod
+    def validate_send_time(cls, value: str) -> str:
+        time_text = value.strip()
+        parts = time_text.split(":")
+        if (
+            len(parts) != 2
+            or any(len(part) != 2 or not part.isdigit() for part in parts)
+            or not 0 <= int(parts[0]) <= 23
+            or not 0 <= int(parts[1]) <= 59
+        ):
+            raise ValueError("推送时间必须使用 HH:MM 格式")
+        return time_text
+
+    @model_validator(mode="after")
+    def validate_news_limits(self):
+        if self.max_items_per_category > self.max_total_news:
+            raise ValueError("每类新闻数量不能大于新闻总数")
+        return self
 
 
 def _json_list(value: object) -> List[str]:
@@ -238,6 +270,30 @@ def profile() -> Dict[str, object]:
         **profile_data,
         "interaction_summary": get_interaction_summary(db_path=DB_PATH),
     }
+
+
+@app.get("/api/settings")
+def user_settings() -> Dict[str, object]:
+    return get_user_settings(settings.filtering, DB_PATH)
+
+
+@app.put("/api/settings")
+def update_user_settings(
+    body: UserSettingsUpdate,
+) -> Dict[str, object]:
+    try:
+        return save_user_settings(
+            email_enabled=body.email_enabled,
+            email_send_time=body.email_send_time,
+            low_api_mode=body.low_api_mode,
+            max_total_news=body.max_total_news,
+            max_items_per_category=body.max_items_per_category,
+            enable_bilingual_report=body.enable_bilingual_report,
+            enable_enrichment=body.enable_enrichment,
+            db_path=DB_PATH,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/api/analytics")

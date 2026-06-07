@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from src.ai_scorer import apply_rule_only_score, score_news_with_ai
 from src.config import load_settings
 from src.database import (
+    get_email_settings,
     get_generation_settings,
     initialize_database,
     save_news_items,
@@ -56,6 +57,47 @@ def _print_task_failure(stage: str, exc: Exception) -> None:
     print("=" * 60)
 
 
+def _load_runtime_settings(send_mode: bool):
+    """加载基础配置，并用 SQLite 用户设置覆盖本次运行参数。"""
+
+    settings = load_settings(send_email=False)
+    initialize_database(settings.database_path)
+    email_settings = get_email_settings(settings.database_path)
+    if send_mode and bool(email_settings["email_enabled"]):
+        settings = load_settings(send_email=True)
+    generation_settings = get_generation_settings(
+        settings.filtering,
+        settings.database_path,
+    )
+    settings.filtering.update(generation_settings)
+    settings.filtering["ai_scoring_mode"] = (
+        "top_candidates_only"
+        if bool(generation_settings["low_api_mode"])
+        else "all_items"
+    )
+    return settings, email_settings, generation_settings
+
+
+def _deliver_report(
+    settings,
+    markdown_text: str,
+    html_text: str,
+    report_date,
+    send_mode: bool,
+    email_enabled: bool,
+) -> bool:
+    if send_mode and not email_enabled:
+        print("设置页已关闭邮件推送，本次 --send 跳过邮件发送。")
+        return False
+    return send_email(
+        settings,
+        markdown_text,
+        html_text,
+        report_date,
+        dry_run=not send_mode,
+    )
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="生成并发送 AI 新闻雷达。")
     mode = parser.add_mutually_exclusive_group()
@@ -79,24 +121,20 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
     try:
         current_stage = "加载配置和检查数据库"
         print("步骤 1/12：加载 V5 配置并检查数据库。")
-        settings = load_settings(send_email=send_mode)
-        initialize_database(settings.database_path)
-        generation_settings = get_generation_settings(
-            settings.filtering,
-            settings.database_path,
-        )
-        settings.filtering.update(generation_settings)
-        settings.filtering["ai_scoring_mode"] = (
-            "top_candidates_only"
-            if bool(generation_settings["low_api_mode"])
-            else "all_items"
-        )
+        (
+            settings,
+            email_settings,
+            generation_settings,
+        ) = _load_runtime_settings(send_mode)
         report_date = datetime.now(ZoneInfo(settings.timezone)).date()
         print(
             "生成设置："
             f"省 API={'开启' if generation_settings['low_api_mode'] else '关闭'}，"
             f"日报最多 {generation_settings['max_total_news']} 条，"
-            f"AI 候选 {generation_settings['pre_ai_prefilter_limit']} 条。"
+            f"每类最多 {generation_settings['max_items_per_category']} 条，"
+            f"AI 候选 {generation_settings['pre_ai_prefilter_limit']} 条，"
+            f"邮件={'开启' if email_settings['email_enabled'] else '关闭'}"
+            f"（推送时间 {email_settings['email_send_time']}）。"
         )
 
         current_stage = "抓取 RSS 新闻"
@@ -316,12 +354,13 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
         sent = False
         email_error = None
         try:
-            sent = send_email(
+            sent = _deliver_report(
                 settings,
                 markdown_text,
                 html_text,
                 report_date,
-                dry_run=not send_mode,
+                send_mode=send_mode,
+                email_enabled=bool(email_settings["email_enabled"]),
             )
         except RuntimeError as exc:
             email_error = exc

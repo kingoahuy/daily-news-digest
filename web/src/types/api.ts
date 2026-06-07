@@ -86,3 +86,16 @@ export type AnalyticsData = {
     total: number;
   };
 };
+
+export type UserSettings = {
+  email_enabled: boolean;
+  email_send_time: string;
+  low_api_mode: boolean;
+  max_total_news: number;
+  max_items_per_category: number;
+  enable_bilingual_report: boolean;
+  enable_enrichment: boolean;
+  updated_at: string;
+};
+
+export type UserSettingsUpdate = Omit<UserSettings, "updated_at">;

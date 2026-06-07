@@ -5,6 +5,8 @@ import type {
   ApiReport,
   InteractionState,
   PreferenceProfile,
+  UserSettings,
+  UserSettingsUpdate,
 } from "@/types/api";
 
 const configuredBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "");
@@ -77,9 +79,18 @@ async function request<T>(
   if (!response.ok) {
     let message = `请求失败（${response.status}）`;
     try {
-      const payload = (await response.json()) as { detail?: string };
-      if (payload.detail) {
+      const payload = (await response.json()) as {
+        detail?: string | Array<{ msg?: string }>;
+      };
+      if (typeof payload.detail === "string") {
         message = payload.detail;
+      } else if (Array.isArray(payload.detail)) {
+        const details = payload.detail
+          .map((item) => item.msg)
+          .filter((item): item is string => Boolean(item));
+        if (details.length) {
+          message = details.join("；");
+        }
       }
     } catch {
       // Keep the status-based fallback message.
@@ -132,3 +143,12 @@ export const getProfile = () =>
 
 export const getAnalytics = () =>
   request<AnalyticsData>("/api/analytics");
+
+export const getUserSettings = () =>
+  request<UserSettings>("/api/settings");
+
+export const updateUserSettings = (settings: UserSettingsUpdate) =>
+  request<UserSettings>("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });

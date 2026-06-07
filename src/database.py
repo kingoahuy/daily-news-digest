@@ -25,6 +25,19 @@ DEFAULT_GENERATION_SETTINGS = {
     "enable_enrichment": "true",
     "max_enriched_items": "1",
 }
+USER_SETTING_DESCRIPTIONS = {
+    "email_enabled": "是否启用邮件推送",
+    "email_send_time": "本地每日邮件发送时间",
+    "timezone": "本地邮件调度时区",
+    "auto_send_local_enabled": "是否启用本地自动发送",
+    "low_api_mode": "是否启用省 API 模式",
+    "max_total_news": "每期日报最多新闻数",
+    "max_items_per_category": "每个分类最多新闻数",
+    "pre_ai_prefilter_limit": "进入 AI 精评的候选新闻数",
+    "enable_bilingual_report": "是否生成中英文双语日报",
+    "enable_enrichment": "是否启用核心新闻背景补充",
+    "max_enriched_items": "每期最多背景补充新闻数",
+}
 
 
 def _utc_now_text() -> str:
@@ -258,19 +271,6 @@ def initialize_database(
     )
 
     now = _utc_now_text()
-    descriptions = {
-        "email_enabled": "是否启用邮件推送",
-        "email_send_time": "本地每日邮件发送时间",
-        "timezone": "本地邮件调度时区",
-        "auto_send_local_enabled": "是否启用本地自动发送",
-        "low_api_mode": "是否启用省 API 模式",
-        "max_total_news": "每期日报最多新闻数",
-        "max_items_per_category": "每个分类最多新闻数",
-        "pre_ai_prefilter_limit": "进入 AI 精评的候选新闻数",
-        "enable_bilingual_report": "是否生成中英文双语日报",
-        "enable_enrichment": "是否启用核心新闻背景补充",
-        "max_enriched_items": "每期最多背景补充新闻数",
-    }
     default_settings = {
         **DEFAULT_EMAIL_SETTINGS,
         **DEFAULT_GENERATION_SETTINGS,
@@ -283,7 +283,7 @@ def initialize_database(
         VALUES (?, ?, ?, ?)
         """,
         [
-            (key, value, descriptions[key], now)
+            (key, value, USER_SETTING_DESCRIPTIONS[key], now)
             for key, value in default_settings.items()
         ],
     )
@@ -1044,6 +1044,114 @@ def save_generation_settings(
     }
     for key, value in values.items():
         set_setting(key, value, descriptions[key], db_path)
+
+
+def get_user_settings(
+    defaults: Optional[Dict[str, object]] = None,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> Dict[str, object]:
+    """返回 Next.js 与主流程共用的真实用户设置。"""
+
+    email = get_email_settings(db_path)
+    generation = get_generation_settings(defaults, db_path)
+    with database_connection(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT MAX(updated_at) AS updated_at
+            FROM user_settings
+            WHERE setting_key IN (
+                'email_enabled',
+                'email_send_time',
+                'low_api_mode',
+                'max_total_news',
+                'max_items_per_category',
+                'enable_bilingual_report',
+                'enable_enrichment'
+            )
+            """
+        ).fetchone()
+    return {
+        "email_enabled": bool(email["email_enabled"]),
+        "email_send_time": str(email["email_send_time"]),
+        "low_api_mode": bool(generation["low_api_mode"]),
+        "max_total_news": int(generation["max_total_news"]),
+        "max_items_per_category": int(
+            generation["max_items_per_category"]
+        ),
+        "enable_bilingual_report": bool(
+            generation["enable_bilingual_report"]
+        ),
+        "enable_enrichment": bool(generation["enable_enrichment"]),
+        "updated_at": str(row["updated_at"] or "") if row else "",
+    }
+
+
+def save_user_settings(
+    email_enabled: bool,
+    email_send_time: str,
+    low_api_mode: bool,
+    max_total_news: int,
+    max_items_per_category: int,
+    enable_bilingual_report: bool,
+    enable_enrichment: bool,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> Dict[str, object]:
+    """原子保存网页设置，避免部分字段成功、部分字段失败。"""
+
+    time_text = str(email_send_time).strip()
+    time_parts = time_text.split(":")
+    if (
+        len(time_parts) != 2
+        or any(len(part) != 2 or not part.isdigit() for part in time_parts)
+        or not 0 <= int(time_parts[0]) <= 23
+        or not 0 <= int(time_parts[1]) <= 59
+    ):
+        raise ValueError("推送时间必须使用 HH:MM 格式。")
+
+    total = int(max_total_news)
+    per_category = int(max_items_per_category)
+    if not 1 <= total <= 100:
+        raise ValueError("新闻总数必须在 1 到 100 之间。")
+    if not 1 <= per_category <= 30:
+        raise ValueError("每类新闻数量必须在 1 到 30 之间。")
+    if per_category > total:
+        raise ValueError("每类新闻数量不能大于新闻总数。")
+
+    values = {
+        "email_enabled": str(bool(email_enabled)).lower(),
+        "email_send_time": time_text,
+        "low_api_mode": str(bool(low_api_mode)).lower(),
+        "max_total_news": str(total),
+        "max_items_per_category": str(per_category),
+        "enable_bilingual_report": str(
+            bool(enable_bilingual_report)
+        ).lower(),
+        "enable_enrichment": str(bool(enable_enrichment)).lower(),
+    }
+    now = _utc_now_text()
+    with database_connection(db_path) as connection:
+        connection.executemany(
+            """
+            INSERT INTO user_settings (
+                setting_key, setting_value, description, updated_at
+            )
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(setting_key) DO UPDATE SET
+                setting_value = excluded.setting_value,
+                description = excluded.description,
+                updated_at = excluded.updated_at
+            """,
+            [
+                (
+                    key,
+                    value,
+                    USER_SETTING_DESCRIPTIONS[key],
+                    now,
+                )
+                for key, value in values.items()
+            ],
+        )
+    return get_user_settings(db_path=db_path)
 
 
 def scheduler_has_success(
