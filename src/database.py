@@ -196,6 +196,19 @@ def initialize_database(
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS email_deliveries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_id INTEGER NOT NULL,
+            report_date TEXT NOT NULL,
+            delivery_type TEXT NOT NULL
+                CHECK (delivery_type IN ('manual', 'scheduled')),
+            status TEXT NOT NULL
+                CHECK (status IN ('success', 'failed')),
+            message TEXT,
+            sent_at TEXT NOT NULL,
+            FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE
+        );
+
         CREATE INDEX IF NOT EXISTS idx_reports_date
             ON reports(report_date DESC);
         CREATE INDEX IF NOT EXISTS idx_news_report
@@ -215,6 +228,10 @@ def initialize_database(
             WHERE action_type IN ('like', 'favorite');
         CREATE INDEX IF NOT EXISTS idx_scheduler_runs_date
             ON local_scheduler_runs(run_date, scheduled_time, status);
+        CREATE INDEX IF NOT EXISTS idx_email_deliveries_report
+            ON email_deliveries(report_id, sent_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_email_deliveries_date
+            ON email_deliveries(report_date, sent_at DESC);
         """
     )
 
@@ -321,7 +338,10 @@ def save_report(
                 core_topic = excluded.core_topic,
                 markdown_content = excluded.markdown_content,
                 html_content = excluded.html_content,
-                email_sent = excluded.email_sent,
+                email_sent = CASE
+                    WHEN reports.email_sent = 1 THEN 1
+                    ELSE excluded.email_sent
+                END,
                 generated_at = excluded.generated_at,
                 report_path = excluded.report_path,
                 radar_stats_json = excluded.radar_stats_json
@@ -455,6 +475,97 @@ def get_report(
         return dict(row) if row else None
 
 
+def get_report_by_date(
+    report_date: str,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> Optional[Dict[str, object]]:
+    with database_connection(db_path) as connection:
+        row = connection.execute(
+            "SELECT * FROM reports WHERE report_date = ?",
+            (report_date.strip(),),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def list_report_dates(
+    keyword: str = "",
+    category: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    db_path: Path = DEFAULT_DB_PATH,
+) -> List[Dict[str, object]]:
+    conditions = []
+    parameters: List[object] = []
+
+    if keyword.strip():
+        pattern = f"%{keyword.strip()}%"
+        conditions.append(
+            """
+            (
+                r.title LIKE ?
+                OR r.core_topic LIKE ?
+                OR r.markdown_content LIKE ?
+                OR EXISTS (
+                    SELECT 1 FROM news_items searched
+                    WHERE searched.report_id = r.id
+                    AND (
+                        searched.title LIKE ?
+                        OR searched.summary LIKE ?
+                    )
+                )
+            )
+            """
+        )
+        parameters.extend([pattern, pattern, pattern, pattern, pattern])
+    if category.strip():
+        conditions.append(
+            """
+            EXISTS (
+                SELECT 1 FROM news_items categorized
+                WHERE categorized.report_id = r.id
+                AND categorized.is_active = 1
+                AND categorized.category = ?
+            )
+            """
+        )
+        parameters.append(category.strip())
+    if date_from.strip():
+        conditions.append("r.report_date >= ?")
+        parameters.append(date_from.strip())
+    if date_to.strip():
+        conditions.append("r.report_date <= ?")
+        parameters.append(date_to.strip())
+
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    with database_connection(db_path) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT
+                r.id AS report_id,
+                r.report_date,
+                r.title,
+                r.core_topic,
+                r.email_sent,
+                r.generated_at,
+                (
+                    SELECT COUNT(*)
+                    FROM news_items n
+                    WHERE n.report_id = r.id AND n.is_active = 1
+                ) AS news_count,
+                (
+                    SELECT COUNT(*)
+                    FROM news_interactions i
+                    WHERE i.report_id = r.id
+                ) AS interaction_count
+            FROM reports r
+            {where_clause}
+            ORDER BY r.report_date DESC, r.id DESC
+            """,
+            parameters,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def list_reports(
     keyword: str = "",
     category: str = "",
@@ -483,6 +594,60 @@ def list_reports(
     )
     with database_connection(db_path) as connection:
         rows = connection.execute(query, parameters).fetchall()
+        return [dict(row) for row in rows]
+
+
+def record_email_delivery(
+    report_id: int,
+    report_date: str,
+    status: str,
+    message: str,
+    delivery_type: str = "manual",
+    db_path: Path = DEFAULT_DB_PATH,
+) -> int:
+    if delivery_type not in {"manual", "scheduled"}:
+        raise ValueError("delivery_type 必须是 manual 或 scheduled。")
+    if status not in {"success", "failed"}:
+        raise ValueError("status 必须是 success 或 failed。")
+    with database_connection(db_path) as connection:
+        if status == "success":
+            connection.execute(
+                "UPDATE reports SET email_sent = 1 WHERE id = ?",
+                (int(report_id),),
+            )
+        cursor = connection.execute(
+            """
+            INSERT INTO email_deliveries (
+                report_id, report_date, delivery_type,
+                status, message, sent_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(report_id),
+                report_date.strip(),
+                delivery_type,
+                status,
+                message.strip(),
+                _utc_now_text(),
+            ),
+        )
+        return int(cursor.lastrowid)
+
+
+def list_email_deliveries(
+    report_id: int,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> List[Dict[str, object]]:
+    with database_connection(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT * FROM email_deliveries
+            WHERE report_id = ?
+            ORDER BY sent_at DESC, id DESC
+            """,
+            (int(report_id),),
+        ).fetchall()
         return [dict(row) for row in rows]
 
 

@@ -10,6 +10,36 @@ export type ApiReport = {
   email_sent: boolean;
 };
 
+export type ReportSummary = {
+  report_id: number;
+  report_date: string;
+  title: string;
+  core_topic: string;
+  email_sent: boolean;
+  generated_at: string;
+  news_count: number;
+  interaction_count: number;
+};
+
+export type EmailDelivery = {
+  id: number;
+  report_id: number;
+  report_date: string;
+  delivery_type: "manual" | "scheduled";
+  status: "success" | "failed";
+  message: string;
+  sent_at: string;
+};
+
+export type DeliveryResult = {
+  delivery_id: number;
+  report_id: number;
+  report_date: string;
+  delivery_type: "manual" | "scheduled";
+  status: "success" | "failed";
+  message: string;
+};
+
 export type InteractionState = {
   liked: boolean;
   favorited: boolean;

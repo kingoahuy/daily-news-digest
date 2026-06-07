@@ -147,8 +147,8 @@ export function SettingsPanel() {
           </span>
           <span className="mt-1 block text-xs leading-5 text-muted-foreground">
             {zh
-              ? "供本地邮件调度器读取；手动运行 --send 会立即执行。"
-              : "Used by the local scheduler; manual --send runs immediately."}
+              ? "每日推送时间只控制自动发送；手动发送某一天日报请前往“历史日报”中心。"
+              : "This time controls automatic delivery only. Send a specific date from the History center."}
           </span>
           <input
             type="time"

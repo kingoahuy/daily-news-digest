@@ -34,7 +34,7 @@ def send_email(
             "MAIL_TO 没有有效收件人，请填写一个或多个邮箱地址，多个地址用逗号分隔。"
         )
     knowledge_base_note = (
-        "这份日报已保存到本地新闻知识库，可在 Streamlit 网页端查看和评价。"
+        "这份日报已保存到本地新闻中心，可在 Next.js 网页端查看和评价。"
     )
     email_markdown = f"{knowledge_base_note}\n\n{markdown_text}"
     email_html = html_text

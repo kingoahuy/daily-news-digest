@@ -9,9 +9,9 @@ from src.database import (
     get_email_settings,
     get_generation_settings,
     initialize_database,
+    record_email_delivery,
     save_news_items,
     save_report,
-    update_report_email_status,
 )
 from src.deduplicator import (
     cluster_news,
@@ -365,17 +365,33 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
         except RuntimeError as exc:
             email_error = exc
 
-        if report_id is not None:
+        if (
+            report_id is not None
+            and send_mode
+            and bool(email_settings["email_enabled"])
+        ):
             try:
-                update_report_email_status(
+                delivery_status = "success" if sent else "failed"
+                delivery_message = (
+                    "自动日报邮件发送成功。"
+                    if sent
+                    else str(email_error or "自动日报邮件发送失败。")
+                )
+                delivery_id = record_email_delivery(
                     report_id,
-                    sent,
+                    report_date.isoformat(),
+                    delivery_status,
+                    delivery_message,
+                    delivery_type="scheduled",
                     db_path=settings.database_path,
                 )
-                print(f"数据库邮件状态已更新：email_sent={int(sent)}")
+                print(
+                    f"邮件发送记录已保存：delivery_id={delivery_id}，"
+                    f"status={delivery_status}"
+                )
             except Exception as exc:
                 print(
-                    f"警告：邮件状态写回失败（{type(exc).__name__}）。"
+                    f"警告：邮件发送记录写入失败（{type(exc).__name__}）。"
                 )
 
         if email_error is not None:

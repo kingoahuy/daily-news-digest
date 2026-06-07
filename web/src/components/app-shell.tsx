@@ -6,8 +6,8 @@ import {
   BarChart3,
   Bookmark,
   BookOpenText,
+  CalendarDays,
   LayoutDashboard,
-  Sparkles,
   Radar,
   Settings,
 } from "lucide-react";
@@ -16,10 +16,10 @@ import { LanguageToggle } from "@/components/language-toggle";
 import { cn } from "@/lib/utils";
 
 const navigation = [
-  { href: "/", label: "日报", icon: LayoutDashboard },
-  { href: "/analytics", label: "分析", icon: BarChart3 },
+  { href: "/", label: "今日", icon: LayoutDashboard },
+  { href: "/history", label: "历史", icon: CalendarDays },
   { href: "/favorites", label: "收藏", icon: Bookmark },
-  { href: "/profile", label: "画像", icon: Sparkles },
+  { href: "/analytics", label: "分析", icon: BarChart3 },
   { href: "/settings", label: "设置", icon: Settings },
 ];
 
@@ -48,7 +48,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             const active =
               item.href === "/"
                 ? pathname === "/" || pathname.startsWith("/news/")
-                : pathname.startsWith(item.href);
+                : item.href === "/history"
+                  ? pathname.startsWith("/history") ||
+                    pathname.startsWith("/reports/")
+                  : pathname.startsWith(item.href);
             const Icon = item.icon;
             return (
               <Link
@@ -71,10 +74,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="mt-auto rounded-2xl border border-sidebar-border bg-background/55 p-4">
           <div className="flex items-center gap-2 text-sm font-medium">
             <BookOpenText className="size-4 text-[#b45309]" />
-            前端预览版
+            本地新闻中心
           </div>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            正在读取本机 SQLite。Python 抓取、邮件和 Actions 保持原样。
+            Next.js 读取本机 SQLite，历史日报与互动实时保存。
           </p>
         </div>
       </aside>
@@ -104,7 +107,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           const active =
             item.href === "/"
               ? pathname === "/" || pathname.startsWith("/news/")
-              : pathname.startsWith(item.href);
+              : item.href === "/history"
+                ? pathname.startsWith("/history") ||
+                  pathname.startsWith("/reports/")
+                : pathname.startsWith(item.href);
           const Icon = item.icon;
           return (
             <Link

@@ -1,9 +1,10 @@
 import json
 from collections import Counter
 from contextlib import asynccontextmanager
-from typing import Dict, List
+from datetime import date
+from typing import Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -14,17 +15,22 @@ from src.database import (
     get_interaction_state,
     get_interaction_summary,
     get_latest_report,
+    get_report,
+    get_report_by_date,
     get_news_comments,
     get_news_item,
     get_news_items,
     get_user_settings,
     initialize_database,
+    list_email_deliveries,
+    list_report_dates,
     list_reports,
     save_user_settings,
     toggle_favorite,
     toggle_like,
 )
 from src.preference import build_user_preference_profile
+from src.report_delivery import ReportDeliveryError, deliver_stored_report
 
 
 settings = load_settings(send_email=False, require_api_key=False)
@@ -130,6 +136,31 @@ def _report_payload(report: Dict[str, object]) -> Dict[str, object]:
     }
 
 
+def _report_summary_payload(report: Dict[str, object]) -> Dict[str, object]:
+    return {
+        "report_id": int(report["report_id"]),
+        "report_date": str(report["report_date"]),
+        "title": str(report.get("title") or ""),
+        "core_topic": str(report.get("core_topic") or ""),
+        "email_sent": bool(report.get("email_sent")),
+        "generated_at": str(report.get("generated_at") or ""),
+        "news_count": int(report.get("news_count") or 0),
+        "interaction_count": int(report.get("interaction_count") or 0),
+    }
+
+
+def _delivery_payload(delivery: Dict[str, object]) -> Dict[str, object]:
+    return {
+        "id": int(delivery["id"]),
+        "report_id": int(delivery["report_id"]),
+        "report_date": str(delivery["report_date"]),
+        "delivery_type": str(delivery["delivery_type"]),
+        "status": str(delivery["status"]),
+        "message": str(delivery.get("message") or ""),
+        "sent_at": str(delivery["sent_at"]),
+    }
+
+
 def _news_payload(
     news: Dict[str, object],
     include_interactions: bool = True,
@@ -187,10 +218,78 @@ def latest_report() -> Dict[str, object]:
     return _report_payload(report)
 
 
+@app.get("/api/reports")
+def reports(
+    query: str = "",
+    category: str = "",
+    date_from: Optional[date] = Query(default=None),
+    date_to: Optional[date] = Query(default=None),
+) -> List[Dict[str, object]]:
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(
+            status_code=422,
+            detail="开始日期不能晚于结束日期。",
+        )
+    rows = list_report_dates(
+        keyword=query,
+        category=category,
+        date_from=date_from.isoformat() if date_from else "",
+        date_to=date_to.isoformat() if date_to else "",
+        db_path=DB_PATH,
+    )
+    return [_report_summary_payload(row) for row in rows]
+
+
+@app.get("/api/reports/by-date/{report_date}")
+def report_by_date(report_date: date) -> Dict[str, object]:
+    report = get_report_by_date(report_date.isoformat(), DB_PATH)
+    if not report:
+        raise HTTPException(status_code=404, detail="该日期没有日报。")
+    return _report_payload(report)
+
+
+@app.get("/api/reports/by-date/{report_date}/news")
+def report_news_by_date(report_date: date) -> List[Dict[str, object]]:
+    report = get_report_by_date(report_date.isoformat(), DB_PATH)
+    if not report:
+        raise HTTPException(status_code=404, detail="该日期没有日报。")
+    rows = get_news_items(int(report["id"]), DB_PATH)
+    return [_news_payload(row) for row in rows]
+
+
 @app.get("/api/reports/{report_id}/news")
 def report_news(report_id: int) -> List[Dict[str, object]]:
+    if not get_report(report_id, DB_PATH):
+        raise HTTPException(status_code=404, detail="日报不存在。")
     rows = get_news_items(report_id, DB_PATH)
     return [_news_payload(row) for row in rows]
+
+
+@app.post("/api/reports/{report_id}/send")
+def send_stored_report(report_id: int) -> Dict[str, object]:
+    try:
+        return deliver_stored_report(
+            report_id=report_id,
+            delivery_type="manual",
+            db_path=DB_PATH,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ReportDeliveryError as exc:
+        status_code = (
+            409 if "邮件推送已关闭" in str(exc) else 502
+        )
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@app.get("/api/reports/{report_id}/deliveries")
+def report_deliveries(report_id: int) -> List[Dict[str, object]]:
+    if not get_report(report_id, DB_PATH):
+        raise HTTPException(status_code=404, detail="日报不存在。")
+    return [
+        _delivery_payload(row)
+        for row in list_email_deliveries(report_id, DB_PATH)
+    ]
 
 
 @app.get("/api/news/{news_id}")
