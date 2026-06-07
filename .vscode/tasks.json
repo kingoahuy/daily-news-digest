@@ -1,0 +1,106 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "启动新闻知识库网页",
+      "type": "process",
+      "command": "python",
+      "args": [
+        "scripts/start_web.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "runOptions": {
+        "runOn": "folderOpen",
+        "instanceLimit": 1
+      }
+    },
+    {
+      "label": "停止新闻知识库网页",
+      "type": "process",
+      "command": "python",
+      "args": [
+        "scripts/stop_web.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "查看网页运行状态",
+      "type": "process",
+      "command": "python",
+      "args": [
+        "scripts/status_web.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "打开网页",
+      "type": "process",
+      "command": "python",
+      "args": [
+        "scripts/open_web.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "生成今日日报",
+      "type": "process",
+      "command": "python",
+      "args": [
+        "-m",
+        "src.main",
+        "--dry-run"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "发送今日日报邮件",
+      "type": "process",
+      "command": "python",
+      "args": [
+        "-m",
+        "src.main",
+        "--send"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "启动本地邮件调度器",
+      "type": "process",
+      "command": "python",
+      "args": [
+        "scripts/local_mail_scheduler.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    }
+  ]
+}

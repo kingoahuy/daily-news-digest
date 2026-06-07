@@ -5,3 +5,13 @@ __pycache__/
 .DS_Store
 reports/*.md
 !reports/.gitkeep
+data/*.db
+data/*.db-*
+data/*.db-journal
+data/*.sqlite*
+!data/.gitkeep
+.streamlit/secrets.toml
+.runtime/*
+!.runtime/.gitkeep
+logs/*.log
+!logs/.gitkeep

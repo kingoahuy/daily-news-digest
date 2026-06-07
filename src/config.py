@@ -1,8 +1,14 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import yaml
 from dotenv import load_dotenv
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ConfigError(ValueError):
@@ -25,6 +31,15 @@ class Settings:
     timezone: str
     max_news_per_category: int
     news_lookback_hours: int
+    database_path: Path
+    feeds_path: Path
+    preferences_path: Path
+    app_config_path: Path
+    filtering_path: Path
+    delivery_path: Path
+    app_config: Dict[str, Any]
+    filtering: Dict[str, Any]
+    delivery: Dict[str, Any]
 
 
 def _get_env(name: str, default: str = "") -> str:
@@ -46,16 +61,77 @@ def _positive_int(name: str, default: int) -> int:
     return value
 
 
-def load_settings(send_email: bool = False) -> Settings:
+def _project_path(name: str, default: Path) -> Path:
+    raw_value = _get_env(name)
+    if not raw_value:
+        return default
+
+    path = Path(raw_value).expanduser()
+    return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+def _load_yaml(path: Path, label: str) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            data = yaml.safe_load(file) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise ConfigError(f"无法读取{label} {path}：{exc}") from exc
+    if not isinstance(data, dict):
+        raise ConfigError(f"{label}格式错误：顶层必须是对象。")
+    return data
+
+
+def _configured_int(
+    env_name: str,
+    config: Dict[str, Any],
+    config_key: str,
+    default: int,
+) -> int:
+    raw_value = _get_env(env_name)
+    if not raw_value:
+        raw_value = str(config.get(config_key, default))
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(
+            f"{env_name}/{config_key} 必须是整数，当前值为：{raw_value!r}。"
+        ) from exc
+    if value <= 0:
+        raise ConfigError(f"{env_name}/{config_key} 必须大于 0。")
+    return value
+
+
+def load_settings(
+    send_email: bool = False,
+    require_api_key: bool = True,
+) -> Settings:
     """从 .env 和系统环境变量加载配置。
 
-    dry-run 只要求 DeepSeek API Key；send 模式还会检查 SMTP 配置。
+    主流程默认要求 DeepSeek API Key；网页端只读配置时可以关闭这项检查。
+    send 模式还会检查 SMTP 配置。
     """
 
     load_dotenv()
 
+    app_config_path = _project_path(
+        "APP_CONFIG_PATH", PROJECT_ROOT / "config" / "app.yaml"
+    )
+    filtering_path = _project_path(
+        "FILTERING_PATH", PROJECT_ROOT / "config" / "filtering.yaml"
+    )
+    delivery_path = _project_path(
+        "DELIVERY_PATH", PROJECT_ROOT / "config" / "delivery.yaml"
+    )
+    app_config = _load_yaml(app_config_path, "应用配置")
+    filtering = _load_yaml(filtering_path, "过滤配置")
+    delivery = _load_yaml(delivery_path, "投递配置")
+
     deepseek_api_key = _get_env("DEEPSEEK_API_KEY")
-    required_values = {"DEEPSEEK_API_KEY": deepseek_api_key}
+    required_values = {}
+    if require_api_key:
+        required_values["DEEPSEEK_API_KEY"] = deepseek_api_key
 
     smtp_values = {
         "SMTP_HOST": _get_env("SMTP_HOST"),
@@ -74,7 +150,10 @@ def load_settings(send_email: bool = False) -> Settings:
             f"缺少 {names}，请在 .env 或 GitHub Secrets 中配置。"
         )
 
-    timezone_name = _get_env("TIMEZONE", "Asia/Singapore")
+    timezone_name = _get_env(
+        "TIMEZONE",
+        str(app_config.get("timezone", "Asia/Singapore")),
+    )
     try:
         ZoneInfo(timezone_name)
     except ZoneInfoNotFoundError as exc:
@@ -97,6 +176,35 @@ def load_settings(send_email: bool = False) -> Settings:
         mail_from=smtp_values["MAIL_FROM"],
         mail_to=smtp_values["MAIL_TO"],
         timezone=timezone_name,
-        max_news_per_category=_positive_int("MAX_NEWS_PER_CATEGORY", 8),
-        news_lookback_hours=_positive_int("NEWS_LOOKBACK_HOURS", 36),
+        max_news_per_category=_configured_int(
+            "MAX_NEWS_PER_CATEGORY",
+            filtering,
+            "max_items_per_category",
+            6,
+        ),
+        news_lookback_hours=_configured_int(
+            "NEWS_LOOKBACK_HOURS",
+            filtering,
+            "time_window_hours",
+            36,
+        ),
+        database_path=_project_path(
+            "DATABASE_PATH", PROJECT_ROOT / "data" / "news_digest.db"
+        ),
+        feeds_path=_project_path(
+            "SOURCES_PATH",
+            _project_path(
+                "FEEDS_PATH",
+                PROJECT_ROOT / "config" / "sources.yaml",
+            ),
+        ),
+        preferences_path=_project_path(
+            "PREFERENCES_PATH", PROJECT_ROOT / "config" / "preferences.yaml"
+        ),
+        app_config_path=app_config_path,
+        filtering_path=filtering_path,
+        delivery_path=delivery_path,
+        app_config=app_config,
+        filtering=filtering,
+        delivery=delivery,
     )

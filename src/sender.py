@@ -29,12 +29,28 @@ def send_email(
     recipients = [
         address.strip() for address in settings.mail_to.split(",") if address.strip()
     ]
+    knowledge_base_note = (
+        "这份日报已保存到本地新闻知识库，可在 Streamlit 网页端查看和评价。"
+    )
+    email_markdown = f"{knowledge_base_note}\n\n{markdown_text}"
+    email_html = html_text
+    marker = '<div style="max-width:760px;'
+    notice_html = (
+        '<p style="padding:12px 16px;background:#eef4ff;'
+        'border-radius:6px;color:#344054;">'
+        f"{knowledge_base_note}</p>"
+    )
+    email_html = email_html.replace(marker, notice_html + marker, 1)
+
     message = MIMEMultipart("alternative")
-    message["Subject"] = f"今日早间热点新闻日报｜{_date_text(report_date)}"
+    message["Subject"] = (
+        f"个人 AI 新闻雷达 / Personal AI News Radar｜"
+        f"{_date_text(report_date)}"
+    )
     message["From"] = settings.mail_from
     message["To"] = ", ".join(recipients)
-    message.attach(MIMEText(markdown_text, "plain", "utf-8"))
-    message.attach(MIMEText(html_text, "html", "utf-8"))
+    message.attach(MIMEText(email_markdown, "plain", "utf-8"))
+    message.attach(MIMEText(email_html, "html", "utf-8"))
 
     try:
         with smtplib.SMTP_SSL(

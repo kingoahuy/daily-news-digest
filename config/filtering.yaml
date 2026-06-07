@@ -1,0 +1,17 @@
+time_window_hours: 36
+ai_score_threshold: 6.5
+core_topic_threshold: 7.5
+max_items_per_category: 6
+max_enriched_items: 3
+ai_batch_size: 10
+ai_max_retries: 3
+enable_ai_scoring: true
+enable_deduplication: true
+enable_enrichment: true
+
+category_weights:
+  technology: 1.5
+  finance: 1.5
+  sports: 1.4
+  society: 1.2
+  politics: 1.2

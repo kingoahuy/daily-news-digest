@@ -1,0 +1,9 @@
+project_title: "个人 AI 新闻雷达"
+project_title_en: "Personal AI News Radar"
+timezone: "Asia/Singapore"
+report_languages:
+  - "zh-CN"
+  - "en"
+report_format: "bilingual"
+database_path_env: "DATABASE_PATH"
+preferences_path_env: "PREFERENCES_PATH"

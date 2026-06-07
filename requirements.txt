@@ -5,3 +5,5 @@ PyYAML
 markdown
 beautifulsoup4
 tzdata
+streamlit
+pandas

@@ -37,7 +37,7 @@ def format_and_save_report(
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <title>{escape(f"今日早间热点新闻日报｜{date_text}")}</title>
+  <title>{escape(f"个人 AI 新闻雷达 / Personal AI News Radar｜{date_text}")}</title>
   <style>
     h1, h2, h3 {{ line-height: 1.35; margin: 1.4em 0 0.55em; }}
     p {{ margin: 0.75em 0; }}

@@ -1,0 +1,21 @@
+email:
+  enabled: true
+  smtp_host_env: "SMTP_HOST"
+  smtp_port_env: "SMTP_PORT"
+  smtp_user_env: "SMTP_USER"
+  smtp_password_env: "SMTP_PASSWORD"
+  mail_from_env: "MAIL_FROM"
+  mail_to_env: "MAIL_TO"
+
+local_web:
+  enabled: true
+  command: "streamlit run app.py"
+
+github_pages:
+  enabled: false
+  docs_dir: "docs"
+  reports_dir: "docs/reports"
+
+webhook:
+  enabled: false
+  url_env: "NEWS_WEBHOOK_URL"

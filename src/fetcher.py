@@ -3,6 +3,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
+from urllib.request import Request, urlopen
 
 import feedparser
 import yaml
@@ -14,12 +15,16 @@ from src.models import NewsItem
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_FEEDS_PATH = PROJECT_ROOT / "config" / "feeds.yaml"
+RSS_TIMEOUT_SECONDS = 20
 
 
 def _clean_html(value: str) -> str:
     """删除 RSS 摘要中的 HTML，并压缩多余空白。"""
 
-    text = BeautifulSoup(value or "", "html.parser").get_text(" ", strip=True)
+    raw_value = value or ""
+    if "<" not in raw_value and ">" not in raw_value:
+        return re.sub(r"\s+", " ", raw_value).strip()
+    text = BeautifulSoup(raw_value, "html.parser").get_text(" ", strip=True)
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -44,6 +49,10 @@ def _load_feeds(feeds_path: Path) -> Dict[str, List[Dict[str, str]]]:
 
     if not isinstance(data, dict):
         raise RuntimeError("RSS 配置格式错误：顶层必须按分类组织。")
+    if "sources" in data:
+        data = data["sources"]
+    if not isinstance(data, dict):
+        raise RuntimeError("RSS 配置格式错误：sources 必须按分类组织。")
     return data
 
 
@@ -51,6 +60,22 @@ def _normalized_key(item: NewsItem) -> Tuple[str, str]:
     normalized_title = re.sub(r"\s+", " ", item.title).strip().casefold()
     normalized_url = item.url.strip().rstrip("/").casefold()
     return normalized_title, normalized_url
+
+
+def _parse_feed(url: str):
+    """显式下载 RSS，给每个来源设置超时并提供常见 User-Agent。"""
+
+    request = Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (compatible; DailyNewsDigest/2.0; "
+                "+https://github.com/kingoahuy/daily-news-digest)"
+            )
+        },
+    )
+    with urlopen(request, timeout=RSS_TIMEOUT_SECONDS) as response:
+        return feedparser.parse(response.read())
 
 
 def fetch_news(
@@ -70,6 +95,8 @@ def fetch_news(
             continue
 
         for source_config in sources:
+            if not bool(source_config.get("enabled", True)):
+                continue
             name = str(source_config.get("name", "")).strip()
             url = str(source_config.get("url", "")).strip()
             if not name or not url:
@@ -78,9 +105,12 @@ def fetch_news(
 
             print(f"正在抓取：{name}")
             try:
-                feed = feedparser.parse(url)
+                feed = _parse_feed(url)
             except Exception as exc:
-                print(f"警告：RSS 源 {name} 抓取失败：{exc}")
+                print(
+                    f"警告：RSS 源 {name} 抓取失败"
+                    f"（{type(exc).__name__}），已跳过。"
+                )
                 continue
 
             entries = list(getattr(feed, "entries", []) or [])
@@ -127,5 +157,5 @@ def fetch_news(
         seen.add(key)
         deduplicated.append(item)
 
-    print(f"去重后剩余 {len(deduplicated)} 条新闻。")
+    print(f"RSS 内部精确去重后剩余 {len(deduplicated)} 条新闻。")
     return deduplicated
