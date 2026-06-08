@@ -22,9 +22,15 @@ import {
   generateTodayReport,
   getLatestReport,
   getReportNews,
+  getSchedulerStatus,
   getTodayReportStatus,
 } from "@/lib/api";
-import type { ApiNews, ApiReport, TodayReportStatus } from "@/types/api";
+import type {
+  ApiNews,
+  ApiReport,
+  SchedulerStatus,
+  TodayReportStatus,
+} from "@/types/api";
 
 export default function DashboardPage() {
   const { language, text } = useLanguage();
@@ -34,6 +40,7 @@ export default function DashboardPage() {
   const [error, setError] = useState("");
   const [noReport, setNoReport] = useState(false);
   const [todayStatus, setTodayStatus] = useState<TodayReportStatus | null>(null);
+  const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null);
   const [generating, setGenerating] = useState(false);
   const [generateMessage, setGenerateMessage] = useState("");
 
@@ -41,13 +48,15 @@ export default function DashboardPage() {
     let active = true;
     (async () => {
       try {
-        const [status, latest] = await Promise.all([
+        const [status, latest, schedulerData] = await Promise.all([
           getTodayReportStatus(),
           getLatestReport(),
+          getSchedulerStatus(),
         ]);
         const items = await getReportNews(latest.report_id);
         if (active) {
           setTodayStatus(status);
+          setScheduler(schedulerData);
           setReport(latest);
           setNews(items);
         }
@@ -79,12 +88,14 @@ export default function DashboardPage() {
   }, []);
 
   const reloadLatest = async () => {
-    const [status, latest] = await Promise.all([
+    const [status, latest, schedulerData] = await Promise.all([
       getTodayReportStatus(),
       getLatestReport(),
+      getSchedulerStatus(),
     ]);
     const items = await getReportNews(latest.report_id);
     setTodayStatus(status);
+    setScheduler(schedulerData);
     setReport(latest);
     setNews(items);
     setNoReport(false);
@@ -164,6 +175,20 @@ export default function DashboardPage() {
             <div className="flex gap-3">
               <AlertTriangle className="mt-0.5 size-5 shrink-0" />
               <div>
+                <p className="font-semibold">
+                  今天还没有生成日报，可手动生成。
+                </p>
+                {scheduler?.latest_generation_run?.status === "failed" &&
+                scheduler.latest_generation_run.run_date ===
+                  todayStatus.today ? (
+                  <p className="mt-1 text-xs leading-5 text-red-700">
+                    07:30 自动生成失败：{" "}
+                    {scheduler.latest_generation_run.message ||
+                      scheduler.message ||
+                      "请查看调度器日志。"}
+                    {scheduler.log_file ? ` 日志：${scheduler.log_file}` : ""}
+                  </p>
+                ) : null}
                 <p className="font-medium">
                   今天还没有生成日报。当前显示的是{" "}
                   {todayStatus.latest_report_date || report.report_date} 的历史日报。

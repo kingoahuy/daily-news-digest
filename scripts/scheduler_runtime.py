@@ -33,11 +33,13 @@ def scheduler_settings_reason() -> Tuple[bool, str]:
 
     settings = load_settings(send_email=False, require_api_key=False)
     values = get_email_settings(settings.database_path)
-    if not bool(values["email_enabled"]):
-        return False, "email_enabled=false"
-    if not bool(values["auto_send_local_enabled"]):
-        return False, "auto_send_local_enabled=false"
-    return True, "email_enabled=true, auto_send_local_enabled=true"
+    email_state = "email_enabled=true" if bool(values["email_enabled"]) else "email_enabled=false"
+    auto_state = (
+        "auto_send_local_enabled=true"
+        if bool(values["auto_send_local_enabled"])
+        else "auto_send_local_enabled=false"
+    )
+    return True, f"daily_generation_enabled=true, {email_state}, {auto_state}"
 
 
 def launch_scheduler_if_enabled(

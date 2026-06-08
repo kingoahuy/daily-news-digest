@@ -40,6 +40,11 @@ export type DeliveryResult = {
   message: string;
 };
 
+export type SendTodayResult = DeliveryResult & {
+  generated_before_send: boolean;
+  today_status: TodayReportStatus;
+};
+
 export type TodayReportStatus = {
   today: string;
   has_today_report: boolean;
@@ -152,6 +157,7 @@ export type UserSettingsUpdate = Omit<UserSettings, "updated_at">;
 
 export type SchedulerLatestRun = {
   id: number;
+  task_type?: "generate" | "email";
   run_date: string;
   scheduled_time: string;
   actual_time?: string;
@@ -167,7 +173,9 @@ export type SchedulerStatus = {
   timezone: string;
   current_time: string;
   scheduled_time: string;
+  generation_time: string;
   today: string;
+  generated_today: boolean;
   sent_today: boolean;
   running: boolean;
   pid: number;
@@ -177,6 +185,8 @@ export type SchedulerStatus = {
   started_at: string;
   log_file: string;
   latest_run: SchedulerLatestRun | null;
+  latest_generation_run: SchedulerLatestRun | null;
+  latest_email_run: SchedulerLatestRun | null;
   warning: string;
 };
 

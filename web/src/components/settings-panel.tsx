@@ -23,6 +23,7 @@ import {
   checkSchedulerOnce,
   getSchedulerStatus,
   getUserSettings,
+  sendTodayReport,
   updateUserSettings,
 } from "@/lib/api";
 import type {
@@ -42,6 +43,8 @@ export function SettingsPanel() {
   const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null);
   const [checkingScheduler, setCheckingScheduler] = useState(false);
   const [schedulerOutput, setSchedulerOutput] = useState("");
+  const [sendingToday, setSendingToday] = useState(false);
+  const [sendTodayMessage, setSendTodayMessage] = useState("");
 
   useEffect(() => {
     Promise.all([getUserSettings(), getSchedulerStatus()])
@@ -116,6 +119,25 @@ export function SettingsPanel() {
       );
     } finally {
       setCheckingScheduler(false);
+    }
+  };
+
+  const sendToday = async () => {
+    setSendingToday(true);
+    setError("");
+    setSendTodayMessage("");
+    try {
+      const result = await sendTodayReport();
+      setSendTodayMessage(result.message || "今日日报邮件发送成功。");
+      setScheduler(await getSchedulerStatus());
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "今日日报邮件发送失败。",
+      );
+    } finally {
+      setSendingToday(false);
     }
   };
 
@@ -250,10 +272,31 @@ export function SettingsPanel() {
               )}
               {zh ? "检查一次本地调度器" : "Check scheduler once"}
             </Button>
+            <Button
+              type="button"
+              className="rounded-full"
+              disabled={sendingToday || !settings.email_enabled}
+              onClick={sendToday}
+            >
+              {sendingToday ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <BellRing className="size-4" />
+              )}
+              {zh ? "立即发送今天日报" : "Send today's digest now"}
+            </Button>
           </div>
 
           {scheduler ? (
             <div className="mt-4 grid gap-3 text-xs leading-5 text-muted-foreground sm:grid-cols-2">
+              <StatusLine
+                label={zh ? "日报自动生成时间" : "Daily generation time"}
+                value={scheduler.generation_time}
+              />
+              <StatusLine
+                label={zh ? "今天日报已生成" : "Generated today"}
+                value={scheduler.generated_today ? "是" : "否"}
+              />
               <StatusLine
                 label={zh ? "是否运行" : "Running"}
                 value={
@@ -290,7 +333,21 @@ export function SettingsPanel() {
               {scheduler.latest_run ? (
                 <StatusLine
                   label={zh ? "最近数据库记录" : "Latest DB record"}
-                  value={`${scheduler.latest_run.run_date} ${scheduler.latest_run.scheduled_time} ${scheduler.latest_run.status}`}
+                  value={formatRunSummary(scheduler.latest_run)}
+                  wide
+                />
+              ) : null}
+              {scheduler.latest_generation_run ? (
+                <StatusLine
+                  label={zh ? "最近生成记录" : "Latest generation run"}
+                  value={formatRunSummary(scheduler.latest_generation_run)}
+                  wide
+                />
+              ) : null}
+              {scheduler.latest_email_run ? (
+                <StatusLine
+                  label={zh ? "最近邮件记录" : "Latest email run"}
+                  value={formatRunSummary(scheduler.latest_email_run)}
                   wide
                 />
               ) : null}
@@ -308,7 +365,15 @@ export function SettingsPanel() {
             </p>
           ) : null}
 
+          {sendTodayMessage ? (
+            <p className="mt-4 rounded-lg border border-emerald-600/20 bg-emerald-600/8 px-3 py-2 text-xs leading-5 text-emerald-700">
+              {sendTodayMessage}
+            </p>
+          ) : null}
+
           <div className="mt-4 rounded-lg border bg-background/60 px-3 py-2 text-xs leading-5 text-muted-foreground">
+            <p>本地调度器每天 07:30 生成日报；电脑关机或本地服务未运行时不会执行。</p>
+            <p>邮件发送可以关闭；开启后，本地自动发送会在你设置的时间发送今天已生成的日报。</p>
             <p>启动网页和本地邮件调度器：python scripts/start_all.py</p>
             <p>旧 Streamlit 启动器：python scripts/start_web.py</p>
             <p>单独启动调度器：python scripts/local_mail_scheduler.py</p>
@@ -483,6 +548,23 @@ function toUpdatePayload(settings: UserSettings): UserSettingsUpdate {
     enable_bilingual_report: settings.enable_bilingual_report,
     enable_enrichment: settings.enable_enrichment,
   };
+}
+
+function formatRunSummary(run: SchedulerStatus["latest_run"]): string {
+  if (!run) {
+    return "暂无";
+  }
+  const task = run.task_type ? `${run.task_type} ` : "";
+  const message = run.message ? `: ${truncate(run.message, 160)}` : "";
+  return `${task}${run.run_date} ${run.scheduled_time} ${run.status}${message}`;
+}
+
+function truncate(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
 function StatusLine({

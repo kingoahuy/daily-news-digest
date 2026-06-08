@@ -193,6 +193,7 @@ def initialize_database(
 
         CREATE TABLE IF NOT EXISTS local_scheduler_runs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_type TEXT NOT NULL DEFAULT 'email',
             run_date TEXT NOT NULL,
             scheduled_time TEXT NOT NULL,
             actual_time TEXT,
@@ -287,10 +288,17 @@ def initialize_database(
         connection,
         "local_scheduler_runs",
         {
+            "task_type": "TEXT NOT NULL DEFAULT 'email'",
             "actual_time": "TEXT",
             "message": "TEXT",
             "created_at": "TEXT",
         },
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_scheduler_runs_task_date
+            ON local_scheduler_runs(task_type, run_date, status)
+        """
     )
 
     now = _utc_now_text()
@@ -1371,26 +1379,27 @@ def save_user_settings(
 def scheduler_has_success(
     run_date: str,
     scheduled_time: str = "",
+    task_type: str = "email",
     db_path: Path = DEFAULT_DB_PATH,
 ) -> bool:
+    if task_type and task_type not in {"generate", "email"}:
+        raise ValueError("task_type must be generate or email.")
     with database_connection(db_path) as connection:
+        conditions = ["run_date = ?", "status = 'success'"]
+        parameters: List[object] = [run_date]
         if scheduled_time:
-            row = connection.execute(
-                """
-                SELECT 1 FROM local_scheduler_runs
-                WHERE run_date = ? AND scheduled_time = ? AND status = 'success'
-                LIMIT 1
-                """,
-                (run_date, scheduled_time),
-            ).fetchone()
-            return row is not None
+            conditions.append("scheduled_time = ?")
+            parameters.append(scheduled_time)
+        if task_type:
+            conditions.append("task_type = ?")
+            parameters.append(task_type)
         row = connection.execute(
-            """
+            f"""
             SELECT 1 FROM local_scheduler_runs
-            WHERE run_date = ? AND status = 'success'
+            WHERE {" AND ".join(conditions)}
             LIMIT 1
             """,
-            (run_date,),
+            parameters,
         ).fetchone()
         return row is not None
 
@@ -1402,19 +1411,23 @@ def record_scheduler_run(
     message: str,
     actual_time: str = "",
     db_path: Path = DEFAULT_DB_PATH,
+    task_type: str = "email",
 ) -> int:
     if status not in {"success", "failed", "skipped", "pending"}:
         raise ValueError("调度状态必须是 success、failed、skipped 或 pending。")
+    if task_type not in {"generate", "email"}:
+        raise ValueError("task_type must be generate or email.")
     with database_connection(db_path) as connection:
         cursor = connection.execute(
             """
             INSERT INTO local_scheduler_runs (
-                run_date, scheduled_time, actual_time,
+                task_type, run_date, scheduled_time, actual_time,
                 status, message, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                task_type,
                 run_date,
                 scheduled_time,
                 actual_time,
@@ -1428,8 +1441,21 @@ def record_scheduler_run(
 
 def get_latest_scheduler_run(
     db_path: Path = DEFAULT_DB_PATH,
+    task_type: str = "",
 ) -> Optional[Dict[str, object]]:
+    if task_type and task_type not in {"generate", "email"}:
+        raise ValueError("task_type must be generate or email.")
     with database_connection(db_path) as connection:
+        if task_type:
+            row = connection.execute(
+                """
+                SELECT * FROM local_scheduler_runs
+                WHERE task_type = ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (task_type,),
+            ).fetchone()
+            return dict(row) if row else None
         row = connection.execute(
             """
             SELECT * FROM local_scheduler_runs

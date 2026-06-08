@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from src.config import load_settings
 from src.database import (
     add_comment,
+    get_email_settings,
     get_favorite_news,
     get_interaction_state,
     get_interaction_summary,
@@ -312,6 +313,46 @@ def generate_today_report() -> Dict[str, object]:
         "report": _report_payload(report),
         "today_status": _today_status_payload(),
     }
+
+
+@app.post("/api/reports/send-today")
+def send_today_report() -> Dict[str, object]:
+    email_settings = get_email_settings(DB_PATH)
+    if not bool(email_settings["email_enabled"]):
+        raise HTTPException(
+            status_code=409,
+            detail="邮件发送已关闭，请先在设置页开启邮件发送。",
+        )
+
+    today = _today_text()
+    generated_before_send = False
+    report = get_report_by_date(today, DB_PATH)
+    if not report:
+        generate_today_report()
+        generated_before_send = True
+        report = get_report_by_date(today, DB_PATH)
+
+    if not report:
+        raise HTTPException(
+            status_code=500,
+            detail="发送前未能找到或生成今日日报。",
+        )
+
+    try:
+        delivery = deliver_stored_report(
+            report_date=today,
+            delivery_type="manual",
+            db_path=DB_PATH,
+        )
+        return {
+            **delivery,
+            "generated_before_send": generated_before_send,
+            "today_status": _today_status_payload(),
+        }
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ReportDeliveryError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.get("/api/reports")

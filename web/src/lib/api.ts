@@ -11,6 +11,7 @@ import type {
   ReportSummary,
   SchedulerCheckResult,
   SchedulerStatus,
+  SendTodayResult,
   TodayReportStatus,
   UserSettings,
   UserSettingsUpdate,
@@ -115,6 +116,11 @@ export const getTodayReportStatus = () =>
 
 export const generateTodayReport = () =>
   request<GenerateTodayResult>("/api/reports/generate-today", {
+    method: "POST",
+  });
+
+export const sendTodayReport = () =>
+  request<SendTodayResult>("/api/reports/send-today", {
     method: "POST",
   });
 
