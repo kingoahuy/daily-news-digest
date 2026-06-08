@@ -35,6 +35,7 @@ from web_runtime import (
     utc_now_text,
     write_status,
 )
+from scheduler_runtime import launch_scheduler_if_enabled as launch_local_scheduler
 
 
 MAX_RESTARTS = 5
@@ -461,8 +462,9 @@ def attach_scheduler_status(
     status: Dict[str, object],
     python_executable: Path,
 ) -> Dict[str, object]:
-    scheduler_pid = launch_scheduler_if_enabled(python_executable)
+    scheduler_pid, scheduler_reason = launch_local_scheduler(python_executable)
     status["scheduler_pid"] = scheduler_pid
+    status["scheduler_reason"] = scheduler_reason
     status["scheduler_log_file"] = str(SCHEDULER_LOG_PATH.resolve())
     write_status(status)
     return status
@@ -480,7 +482,8 @@ def print_started(status: Dict[str, object], already_running: bool = False) -> N
         print(f"本地邮件调度器 PID：{scheduler_pid}")
         print(f"调度器日志：{display_relative_path(SCHEDULER_LOG_PATH)}")
     else:
-        print("本地邮件调度器：未启用")
+        reason = str(status.get("scheduler_reason") or "unknown")
+        print(f"本地邮件调度器：未启用或未启动，原因：{reason}")
     print("停止服务：python scripts/stop_web.py")
     print("====================================")
 

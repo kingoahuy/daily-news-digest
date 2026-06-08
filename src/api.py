@@ -1,8 +1,12 @@
 import json
+import subprocess
+import sys
+import threading
 from collections import Counter
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,11 +35,13 @@ from src.database import (
 )
 from src.preference import build_user_preference_profile
 from src.report_delivery import ReportDeliveryError, deliver_stored_report
+from src.scheduler_status import scheduler_status_payload
 
 
 settings = load_settings(send_email=False, require_api_key=False)
 DB_PATH = settings.database_path
 PREFERENCES_PATH = settings.preferences_path
+GENERATION_LOCK = threading.Lock()
 
 
 @asynccontextmanager
@@ -73,6 +79,10 @@ class CommentCreate(BaseModel):
 class UserSettingsUpdate(BaseModel):
     email_enabled: bool
     email_send_time: str
+    timezone: str = "Asia/Singapore"
+    auto_send_local_enabled: bool = False
+    send_grace_minutes: int = Field(default=180, ge=1, le=1440)
+    auto_generate_today_on_web_start: bool = False
     low_api_mode: bool
     max_total_news: int = Field(ge=1, le=100)
     max_items_per_category: int = Field(ge=1, le=30)
@@ -149,6 +159,34 @@ def _report_summary_payload(report: Dict[str, object]) -> Dict[str, object]:
     }
 
 
+def _today_text() -> str:
+    return datetime.now(ZoneInfo(settings.timezone)).date().isoformat()
+
+
+def _today_status_payload() -> Dict[str, object]:
+    today = _today_text()
+    today_report = get_report_by_date(today, DB_PATH)
+    latest = get_latest_report(DB_PATH)
+    latest_date = str(latest.get("report_date") or "") if latest else ""
+    has_today = today_report is not None
+    stale = bool(latest and latest_date != today)
+    message = ""
+    if has_today:
+        message = f"今天 {today} 的日报已生成。"
+    elif latest:
+        message = f"今天还没有生成日报。当前显示的是 {latest_date} 的历史日报。"
+    else:
+        message = "还没有生成任何日报。"
+    return {
+        "today": today,
+        "has_today_report": has_today,
+        "latest_report_date": latest_date,
+        "latest_report_id": int(latest["id"]) if latest else 0,
+        "is_showing_stale_report": stale,
+        "message": message,
+    }
+
+
 def _delivery_payload(delivery: Dict[str, object]) -> Dict[str, object]:
     return {
         "id": int(delivery["id"]),
@@ -216,6 +254,64 @@ def latest_report() -> Dict[str, object]:
     if not report:
         raise HTTPException(status_code=404, detail="还没有生成日报。")
     return _report_payload(report)
+
+
+@app.get("/api/reports/today-status")
+def today_report_status() -> Dict[str, object]:
+    return _today_status_payload()
+
+
+@app.post("/api/reports/generate-today")
+def generate_today_report() -> Dict[str, object]:
+    today = _today_text()
+    existing = get_report_by_date(today, DB_PATH)
+    if existing:
+        return {
+            "status": "exists",
+            "message": f"今天 {today} 的日报已经存在。",
+            "report": _report_payload(existing),
+            "today_status": _today_status_payload(),
+        }
+
+    if not GENERATION_LOCK.acquire(blocking=False):
+        raise HTTPException(
+            status_code=409,
+            detail="今日日报正在生成中，请稍后刷新。",
+        )
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-m", "src.main", "--dry-run"],
+            cwd=settings.app_config_path.parents[1],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=1200,
+            check=False,
+        )
+    finally:
+        GENERATION_LOCK.release()
+
+    output = (completed.stdout + completed.stderr).strip()
+    summary = output[-1200:] if output else f"退出码 {completed.returncode}"
+    if completed.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"今日日报生成失败：{summary}",
+        )
+
+    report = get_report_by_date(today, DB_PATH) or get_latest_report(DB_PATH)
+    if not report or str(report.get("report_date")) != today:
+        raise HTTPException(
+            status_code=500,
+            detail="生成命令已结束，但数据库中仍未找到今日日报。",
+        )
+    return {
+        "status": "generated",
+        "message": f"今天 {today} 的日报已生成。",
+        "report": _report_payload(report),
+        "today_status": _today_status_payload(),
+    }
 
 
 @app.get("/api/reports")
@@ -384,6 +480,12 @@ def update_user_settings(
         return save_user_settings(
             email_enabled=body.email_enabled,
             email_send_time=body.email_send_time,
+            timezone_name=body.timezone,
+            auto_send_local_enabled=body.auto_send_local_enabled,
+            send_grace_minutes=body.send_grace_minutes,
+            auto_generate_today_on_web_start=(
+                body.auto_generate_today_on_web_start
+            ),
             low_api_mode=body.low_api_mode,
             max_total_news=body.max_total_news,
             max_items_per_category=body.max_items_per_category,
@@ -393,6 +495,36 @@ def update_user_settings(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/scheduler/status")
+def scheduler_status() -> Dict[str, object]:
+    return scheduler_status_payload(DB_PATH)
+
+
+@app.post("/api/scheduler/check-once")
+def scheduler_check_once() -> Dict[str, object]:
+    completed = subprocess.run(
+        [sys.executable, "scripts/local_mail_scheduler.py", "--once"],
+        cwd=settings.app_config_path.parents[1],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=1200,
+        check=False,
+    )
+    output = (completed.stdout + completed.stderr).strip()
+    if completed.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=output[-1200:] if output else "调度器检查失败。",
+        )
+    return {
+        "status": "ok",
+        "output": output,
+        "scheduler": scheduler_status_payload(DB_PATH),
+    }
 
 
 @app.get("/api/analytics")

@@ -40,6 +40,22 @@ export type DeliveryResult = {
   message: string;
 };
 
+export type TodayReportStatus = {
+  today: string;
+  has_today_report: boolean;
+  latest_report_date: string;
+  latest_report_id: number;
+  is_showing_stale_report: boolean;
+  message: string;
+};
+
+export type GenerateTodayResult = {
+  status: "exists" | "generated";
+  message: string;
+  report: ApiReport;
+  today_status: TodayReportStatus;
+};
+
 export type InteractionState = {
   liked: boolean;
   favorited: boolean;
@@ -120,6 +136,10 @@ export type AnalyticsData = {
 export type UserSettings = {
   email_enabled: boolean;
   email_send_time: string;
+  timezone: string;
+  auto_send_local_enabled: boolean;
+  send_grace_minutes: number;
+  auto_generate_today_on_web_start: boolean;
   low_api_mode: boolean;
   max_total_news: number;
   max_items_per_category: number;
@@ -129,3 +149,39 @@ export type UserSettings = {
 };
 
 export type UserSettingsUpdate = Omit<UserSettings, "updated_at">;
+
+export type SchedulerLatestRun = {
+  id: number;
+  run_date: string;
+  scheduled_time: string;
+  actual_time?: string;
+  status: "success" | "failed" | "skipped" | "pending";
+  message: string;
+  created_at: string;
+};
+
+export type SchedulerStatus = {
+  email_enabled: boolean;
+  auto_send_local_enabled: boolean;
+  send_grace_minutes: number;
+  timezone: string;
+  current_time: string;
+  scheduled_time: string;
+  today: string;
+  sent_today: boolean;
+  running: boolean;
+  pid: number;
+  state: string;
+  message: string;
+  checked_at: string;
+  started_at: string;
+  log_file: string;
+  latest_run: SchedulerLatestRun | null;
+  warning: string;
+};
+
+export type SchedulerCheckResult = {
+  status: "ok";
+  output: string;
+  scheduler: SchedulerStatus;
+};

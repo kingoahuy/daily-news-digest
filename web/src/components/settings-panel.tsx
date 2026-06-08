@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import {
+  Activity,
+  AlertTriangle,
   BellRing,
   Check,
   Clock3,
@@ -17,8 +19,17 @@ import { useLanguage } from "@/components/language-provider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { getUserSettings, updateUserSettings } from "@/lib/api";
-import type { UserSettings, UserSettingsUpdate } from "@/types/api";
+import {
+  checkSchedulerOnce,
+  getSchedulerStatus,
+  getUserSettings,
+  updateUserSettings,
+} from "@/lib/api";
+import type {
+  SchedulerStatus,
+  UserSettings,
+  UserSettingsUpdate,
+} from "@/types/api";
 
 export function SettingsPanel() {
   const { language } = useLanguage();
@@ -28,10 +39,16 @@ export function SettingsPanel() {
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null);
+  const [checkingScheduler, setCheckingScheduler] = useState(false);
+  const [schedulerOutput, setSchedulerOutput] = useState("");
 
   useEffect(() => {
-    getUserSettings()
-      .then(setSettings)
+    Promise.all([getUserSettings(), getSchedulerStatus()])
+      .then(([settingsData, schedulerData]) => {
+        setSettings(settingsData);
+        setScheduler(schedulerData);
+      })
       .catch((requestError) =>
         setError(
           requestError instanceof Error
@@ -70,6 +87,7 @@ export function SettingsPanel() {
     try {
       const result = await updateUserSettings(toUpdatePayload(settings));
       setSettings(result);
+      setScheduler(await getSchedulerStatus());
       setDirty(false);
       setSaved(true);
       window.setTimeout(() => setSaved(false), 2600);
@@ -79,6 +97,25 @@ export function SettingsPanel() {
       );
     } finally {
       setSaving(false);
+    }
+  };
+
+  const runSchedulerCheck = async () => {
+    setCheckingScheduler(true);
+    setError("");
+    setSchedulerOutput("");
+    try {
+      const result = await checkSchedulerOnce();
+      setScheduler(result.scheduler);
+      setSchedulerOutput(result.output);
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "调度器检查失败。",
+      );
+    } finally {
+      setCheckingScheduler(false);
     }
   };
 
@@ -140,6 +177,23 @@ export function SettingsPanel() {
           />
         </SettingRow>
 
+        <SettingRow
+          title={zh ? "启用本地自动发送" : "Enable local scheduler"}
+          description={
+            zh
+              ? "只有电脑开机、项目服务运行且调度器进程存活时，本地定时邮件才会发送。"
+              : "Local scheduled email requires this PC, services, and the scheduler process to be running."
+          }
+        >
+          <Switch
+            aria-label={zh ? "启用本地自动发送" : "Enable local scheduler"}
+            checked={settings.auto_send_local_enabled}
+            onCheckedChange={(checked) =>
+              update("auto_send_local_enabled", checked)
+            }
+          />
+        </SettingRow>
+
         <label className="mt-5 block rounded-xl border bg-background/55 p-4">
           <span className="flex items-center gap-2 text-sm font-medium">
             <Clock3 className="size-4" />
@@ -160,6 +214,113 @@ export function SettingsPanel() {
             className="mt-3 h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:border-ring focus:ring-3 focus:ring-ring/20 sm:max-w-xs"
           />
         </label>
+
+        <div className="mt-5">
+          <NumberField
+            label={zh ? "错过时间后的补发宽限" : "Missed-send grace window"}
+            description={
+              zh
+                ? "单位：分钟。默认 180，表示 9:00 计划可在 12:00 前补发一次。"
+                : "Minutes. Default 180 means a 9:00 schedule can catch up before 12:00."
+            }
+            value={settings.send_grace_minutes}
+            min={1}
+            max={1440}
+            onChange={(value) => update("send_grace_minutes", value)}
+          />
+        </div>
+
+        <div className="mt-5 rounded-xl border bg-background/55 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="flex items-center gap-2 text-sm font-medium">
+              <Activity className="size-4" />
+              {zh ? "本地调度器状态" : "Local scheduler status"}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-full"
+              disabled={checkingScheduler}
+              onClick={runSchedulerCheck}
+            >
+              {checkingScheduler ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <Clock3 className="size-4" />
+              )}
+              {zh ? "检查一次本地调度器" : "Check scheduler once"}
+            </Button>
+          </div>
+
+          {scheduler ? (
+            <div className="mt-4 grid gap-3 text-xs leading-5 text-muted-foreground sm:grid-cols-2">
+              <StatusLine
+                label={zh ? "是否运行" : "Running"}
+                value={
+                  scheduler.running
+                    ? `是，PID ${scheduler.pid}`
+                    : "未运行"
+                }
+              />
+              <StatusLine
+                label={zh ? "今天是否已发送" : "Sent today"}
+                value={scheduler.sent_today ? "是" : "否"}
+              />
+              <StatusLine
+                label={zh ? "当前本地时间" : "Local time"}
+                value={`${scheduler.current_time || "未知"} ${scheduler.timezone}`}
+              />
+              <StatusLine
+                label={zh ? "计划发送时间" : "Scheduled time"}
+                value={scheduler.scheduled_time}
+              />
+              <StatusLine
+                label={zh ? "最近检查" : "Last check"}
+                value={formatDateTime(scheduler.checked_at)}
+              />
+              <StatusLine
+                label={zh ? "最近结果" : "Last result"}
+                value={scheduler.message || "暂无"}
+              />
+              <StatusLine
+                label={zh ? "日志路径" : "Log path"}
+                value={scheduler.log_file}
+                wide
+              />
+              {scheduler.latest_run ? (
+                <StatusLine
+                  label={zh ? "最近数据库记录" : "Latest DB record"}
+                  value={`${scheduler.latest_run.run_date} ${scheduler.latest_run.scheduled_time} ${scheduler.latest_run.status}`}
+                  wide
+                />
+              ) : null}
+            </div>
+          ) : (
+            <p className="mt-3 text-xs text-muted-foreground">
+              {zh ? "正在读取调度器状态..." : "Loading scheduler status..."}
+            </p>
+          )}
+
+          {scheduler?.warning ? (
+            <p className="mt-4 flex gap-2 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              {scheduler.warning}
+            </p>
+          ) : null}
+
+          <div className="mt-4 rounded-lg border bg-background/60 px-3 py-2 text-xs leading-5 text-muted-foreground">
+            <p>启动网页和本地邮件调度器：python scripts/start_all.py</p>
+            <p>旧 Streamlit 启动器：python scripts/start_web.py</p>
+            <p>单独启动调度器：python scripts/local_mail_scheduler.py</p>
+            <p>检查一次调度状态：python scripts/local_mail_scheduler.py --once</p>
+          </div>
+
+          {schedulerOutput ? (
+            <pre className="mt-4 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border bg-background p-3 text-xs leading-5">
+              {schedulerOutput}
+            </pre>
+          ) : null}
+        </div>
       </SettingsCard>
 
       <SettingsCard
@@ -311,12 +472,34 @@ function toUpdatePayload(settings: UserSettings): UserSettingsUpdate {
   return {
     email_enabled: settings.email_enabled,
     email_send_time: settings.email_send_time,
+    timezone: settings.timezone,
+    auto_send_local_enabled: settings.auto_send_local_enabled,
+    send_grace_minutes: settings.send_grace_minutes,
+    auto_generate_today_on_web_start:
+      settings.auto_generate_today_on_web_start,
     low_api_mode: settings.low_api_mode,
     max_total_news: settings.max_total_news,
     max_items_per_category: settings.max_items_per_category,
     enable_bilingual_report: settings.enable_bilingual_report,
     enable_enrichment: settings.enable_enrichment,
   };
+}
+
+function StatusLine({
+  label,
+  value,
+  wide = false,
+}: {
+  label: string;
+  value: string;
+  wide?: boolean;
+}) {
+  return (
+    <p className={wide ? "sm:col-span-2" : ""}>
+      <span className="font-medium text-foreground/75">{label}：</span>
+      {value || "暂无"}
+    </p>
+  );
 }
 
 function SettingsCard({
@@ -388,7 +571,7 @@ function NumberField({
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="rounded-xl border bg-background/55 p-4">
+    <label className="block rounded-xl border bg-background/55 p-4">
       <span className="flex items-center gap-2 text-sm font-medium">
         <Sparkles className="size-4" />
         {label}

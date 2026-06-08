@@ -26,7 +26,10 @@ def show_status() -> int:
                 f"{display_relative_path(SCHEDULER_LOG_PATH)}"
             )
         else:
-            print("本地邮件调度器：未运行")
+            print(
+                "本地邮件调度器：未运行，原因："
+                f"{status.get('scheduler_reason', 'unknown')}"
+            )
         return 0
 
     print("网页当前未运行")

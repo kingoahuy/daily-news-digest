@@ -5,9 +5,13 @@ import type {
   ApiReport,
   DeliveryResult,
   EmailDelivery,
+  GenerateTodayResult,
   InteractionState,
   PreferenceProfile,
   ReportSummary,
+  SchedulerCheckResult,
+  SchedulerStatus,
+  TodayReportStatus,
   UserSettings,
   UserSettingsUpdate,
 } from "@/types/api";
@@ -106,6 +110,14 @@ async function request<T>(
 export const getLatestReport = () =>
   request<ApiReport>("/api/reports/latest");
 
+export const getTodayReportStatus = () =>
+  request<TodayReportStatus>("/api/reports/today-status");
+
+export const generateTodayReport = () =>
+  request<GenerateTodayResult>("/api/reports/generate-today", {
+    method: "POST",
+  });
+
 export const getReports = (filters?: {
   query?: string;
   category?: string;
@@ -193,4 +205,12 @@ export const updateUserSettings = (settings: UserSettingsUpdate) =>
   request<UserSettings>("/api/settings", {
     method: "PUT",
     body: JSON.stringify(settings),
+  });
+
+export const getSchedulerStatus = () =>
+  request<SchedulerStatus>("/api/scheduler/status");
+
+export const checkSchedulerOnce = () =>
+  request<SchedulerCheckResult>("/api/scheduler/check-once", {
+    method: "POST",
   });

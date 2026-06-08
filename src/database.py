@@ -15,6 +15,8 @@ DEFAULT_EMAIL_SETTINGS = {
     "email_send_time": "08:13",
     "timezone": "Asia/Singapore",
     "auto_send_local_enabled": "false",
+    "send_grace_minutes": "180",
+    "auto_generate_today_on_web_start": "false",
 }
 DEFAULT_GENERATION_SETTINGS = {
     "low_api_mode": "true",
@@ -30,6 +32,8 @@ USER_SETTING_DESCRIPTIONS = {
     "email_send_time": "本地每日邮件发送时间",
     "timezone": "本地邮件调度时区",
     "auto_send_local_enabled": "是否启用本地自动发送",
+    "send_grace_minutes": "本地邮件错过计划时间后的补发宽限分钟数",
+    "auto_generate_today_on_web_start": "网页打开时是否自动生成今日日报",
     "low_api_mode": "是否启用省 API 模式",
     "max_total_news": "每期日报最多新闻数",
     "max_items_per_category": "每个分类最多新闻数",
@@ -191,6 +195,7 @@ def initialize_database(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_date TEXT NOT NULL,
             scheduled_time TEXT NOT NULL,
+            actual_time TEXT,
             status TEXT NOT NULL,
             message TEXT,
             created_at TEXT NOT NULL
@@ -282,6 +287,7 @@ def initialize_database(
         connection,
         "local_scheduler_runs",
         {
+            "actual_time": "TEXT",
             "message": "TEXT",
             "created_at": "TEXT",
         },
@@ -1072,6 +1078,14 @@ def _as_bool(value: object) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _as_int(value: object, default: int, minimum: int = 1) -> int:
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= minimum else default
+
+
 def get_email_settings(
     db_path: Path = DEFAULT_DB_PATH,
 ) -> Dict[str, object]:
@@ -1087,6 +1101,18 @@ def get_email_settings(
         ),
         "auto_send_local_enabled": _as_bool(
             get_setting("auto_send_local_enabled", "false", db_path)
+        ),
+        "send_grace_minutes": _as_int(
+            get_setting("send_grace_minutes", "180", db_path),
+            180,
+            minimum=1,
+        ),
+        "auto_generate_today_on_web_start": _as_bool(
+            get_setting(
+                "auto_generate_today_on_web_start",
+                "false",
+                db_path,
+            )
         ),
     }
 
@@ -1227,6 +1253,10 @@ def get_user_settings(
             WHERE setting_key IN (
                 'email_enabled',
                 'email_send_time',
+                'timezone',
+                'auto_send_local_enabled',
+                'send_grace_minutes',
+                'auto_generate_today_on_web_start',
                 'low_api_mode',
                 'max_total_news',
                 'max_items_per_category',
@@ -1238,6 +1268,12 @@ def get_user_settings(
     return {
         "email_enabled": bool(email["email_enabled"]),
         "email_send_time": str(email["email_send_time"]),
+        "timezone": str(email["timezone"]),
+        "auto_send_local_enabled": bool(email["auto_send_local_enabled"]),
+        "send_grace_minutes": int(email["send_grace_minutes"]),
+        "auto_generate_today_on_web_start": bool(
+            email["auto_generate_today_on_web_start"]
+        ),
         "low_api_mode": bool(generation["low_api_mode"]),
         "max_total_news": int(generation["max_total_news"]),
         "max_items_per_category": int(
@@ -1254,6 +1290,10 @@ def get_user_settings(
 def save_user_settings(
     email_enabled: bool,
     email_send_time: str,
+    timezone_name: str,
+    auto_send_local_enabled: bool,
+    send_grace_minutes: int,
+    auto_generate_today_on_web_start: bool,
     low_api_mode: bool,
     max_total_news: int,
     max_items_per_category: int,
@@ -1281,10 +1321,19 @@ def save_user_settings(
         raise ValueError("每类新闻数量必须在 1 到 30 之间。")
     if per_category > total:
         raise ValueError("每类新闻数量不能大于新闻总数。")
+    grace_minutes = int(send_grace_minutes)
+    if not 1 <= grace_minutes <= 1440:
+        raise ValueError("补发宽限时间必须在 1 到 1440 分钟之间。")
 
     values = {
         "email_enabled": str(bool(email_enabled)).lower(),
         "email_send_time": time_text,
+        "timezone": str(timezone_name).strip() or "Asia/Singapore",
+        "auto_send_local_enabled": str(bool(auto_send_local_enabled)).lower(),
+        "send_grace_minutes": str(grace_minutes),
+        "auto_generate_today_on_web_start": str(
+            bool(auto_generate_today_on_web_start)
+        ).lower(),
         "low_api_mode": str(bool(low_api_mode)).lower(),
         "max_total_news": str(total),
         "max_items_per_category": str(per_category),
@@ -1321,17 +1370,27 @@ def save_user_settings(
 
 def scheduler_has_success(
     run_date: str,
-    scheduled_time: str,
+    scheduled_time: str = "",
     db_path: Path = DEFAULT_DB_PATH,
 ) -> bool:
     with database_connection(db_path) as connection:
+        if scheduled_time:
+            row = connection.execute(
+                """
+                SELECT 1 FROM local_scheduler_runs
+                WHERE run_date = ? AND scheduled_time = ? AND status = 'success'
+                LIMIT 1
+                """,
+                (run_date, scheduled_time),
+            ).fetchone()
+            return row is not None
         row = connection.execute(
             """
             SELECT 1 FROM local_scheduler_runs
-            WHERE run_date = ? AND scheduled_time = ? AND status = 'success'
+            WHERE run_date = ? AND status = 'success'
             LIMIT 1
             """,
-            (run_date, scheduled_time),
+            (run_date,),
         ).fetchone()
         return row is not None
 
@@ -1341,21 +1400,24 @@ def record_scheduler_run(
     scheduled_time: str,
     status: str,
     message: str,
+    actual_time: str = "",
     db_path: Path = DEFAULT_DB_PATH,
 ) -> int:
-    if status not in {"success", "failed", "skipped"}:
-        raise ValueError("调度状态必须是 success、failed 或 skipped。")
+    if status not in {"success", "failed", "skipped", "pending"}:
+        raise ValueError("调度状态必须是 success、failed、skipped 或 pending。")
     with database_connection(db_path) as connection:
         cursor = connection.execute(
             """
             INSERT INTO local_scheduler_runs (
-                run_date, scheduled_time, status, message, created_at
+                run_date, scheduled_time, actual_time,
+                status, message, created_at
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 run_date,
                 scheduled_time,
+                actual_time,
                 status,
                 message[:1000],
                 _utc_now_text(),

@@ -153,8 +153,10 @@ reports/daily_news_YYYY-MM-DD.md
 data/news_digest.db
 ```
 
-Next.js 首页会自动读取 SQLite 中最新日报。如果还没有日报，页面会提示先运行
-`python -m src.main --dry-run`。
+Next.js 首页会自动读取 SQLite 中最新日报。如果今天还没有日报，首页会明确提示
+当前显示的是旧日期的历史日报，并提供“立即生成今日日报”按钮。刷新网页只会检查
+状态和读取数据库，不会自动调用 DeepSeek；只有点击生成按钮或运行 `--dry-run`
+时才会消耗 API。
 
 ## Next.js 页面
 
@@ -191,6 +193,8 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 GET  /api/health
 GET  /api/reports
 GET  /api/reports/latest
+GET  /api/reports/today-status
+POST /api/reports/generate-today
 GET  /api/reports/by-date/{report_date}
 GET  /api/reports/by-date/{report_date}/news
 GET  /api/reports/{report_id}/news
@@ -207,6 +211,8 @@ GET  /api/profile
 GET  /api/analytics
 GET  /api/settings
 PUT  /api/settings
+GET  /api/scheduler/status
+POST /api/scheduler/check-once
 ```
 
 API 直接复用 `src/database.py` 和 `src/preference.py`，不会建立第二套数据库。
@@ -230,6 +236,18 @@ python -m src.main --send
 
 关闭邮件开关后，`--send` 仍会生成并保存日报，但会跳过 SMTP 校验和邮件发送。
 推送时间供本地邮件调度器读取；手动运行 `--send` 会立即执行。
+
+本地自动发送需要同时满足：
+
+1. 邮件推送已开启；
+2. 本地自动发送已开启；
+3. 电脑开机；
+4. 项目服务或调度器进程正在运行；
+5. SMTP 配置正确。
+
+本地调度器不再要求当前时间精确等于计划时间。若计划 09:00 发送，默认会在
+09:00 至 12:00 的 180 分钟宽限窗口内补发一次；当天已经成功发送过则不会重复
+发送。超过宽限时间后会记录 `skipped`，并提示可以去历史日报中心手动发送。
 
 每日推送时间只控制自动发送。需要发送某一天已经生成的日报时，请打开：
 
@@ -272,6 +290,43 @@ python scripts/stop_frontend.py
 ```
 
 两个守护器都会监控子进程；服务意外退出时会尝试自动恢复。
+
+启动全部本地服务和本地邮件调度器：
+
+```powershell
+python scripts/start_all.py
+```
+
+如果邮件推送和本地自动发送都已开启，终端会显示：
+
+```text
+本地邮件调度器 PID：xxxx
+```
+
+如果未启用，会显示类似：
+
+```text
+本地邮件调度器：未启用或未启动，原因：auto_send_local_enabled=false
+```
+
+单独启动调度器：
+
+```powershell
+python scripts/local_mail_scheduler.py
+```
+
+单独检查一次调度器状态：
+
+```powershell
+python scripts/local_mail_scheduler.py --once
+```
+
+输出会包含当前时间、计划时间、是否启用、当天是否已发送、是否准备发送，以及
+跳过原因。日志路径：
+
+```text
+logs/local_mail_scheduler.log
+```
 
 ## Windows 开机登录自启
 
@@ -335,6 +390,15 @@ MAIL_FROM
 MAIL_TO
 ```
 
+### 本地定时邮件和 GitHub Actions 的区别
+
+- 本地定时邮件：依赖你的电脑开机、项目服务运行、本地调度器进程运行，以及本机
+  网络和 SMTP 配置；
+- GitHub Actions：在 GitHub 云端定时运行，不依赖本机开机，也不需要本地网页
+  保持打开；
+- 如果你想稳定每天自动生成并发送，优先使用 GitHub Actions；
+- 如果你希望电脑开机时也能本地补发，可开启网页设置页里的本地自动发送。
+
 ## GitHub Pages
 
 手动生成并导出：
@@ -387,10 +451,34 @@ python scripts/start_all.py
 
 ### 页面提示还没有生成日报
 
-运行：
+网页只读取 SQLite 里已有的最新日报。如果当天还没有运行生成任务，就会显示昨天
+或更早的日报。可以点击首页的“立即生成今日日报”，或运行：
 
 ```powershell
 python -m src.main --dry-run
+```
+
+生成成功后，可以通过以下方式确认：
+
+- 首页日期变成今天；
+- 打开 `http://localhost:3000/history`，列表出现今天日期；
+- 调用 `GET /api/reports/today-status`，确认 `has_today_report=true`。
+
+### 设置了 9 点邮件但没有收到
+
+本地调度器只有在电脑开机、项目服务运行、且调度器进程正在运行时才会发送。电脑
+关机、网页没启动、调度器没启动，都会导致本地自动邮件不发送。
+
+检查一次本地调度器：
+
+```powershell
+python scripts/local_mail_scheduler.py --once
+```
+
+推荐日常启动：
+
+```powershell
+python scripts/start_all.py
 ```
 
 ### 邮件发送失败

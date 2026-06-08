@@ -1,20 +1,30 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, CheckCircle2, LoaderCircle, Sparkles } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarDays,
+  CheckCircle2,
+  LoaderCircle,
+  RefreshCw,
+  Sparkles,
+} from "lucide-react";
 
 import { useLanguage } from "@/components/language-provider";
 import { NewsCard } from "@/components/news-card";
 import { ScoreBadge } from "@/components/score-badge";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { categories } from "@/data/category-data";
 import {
   ApiRequestError,
+  generateTodayReport,
   getLatestReport,
   getReportNews,
+  getTodayReportStatus,
 } from "@/lib/api";
-import type { ApiNews, ApiReport } from "@/types/api";
+import type { ApiNews, ApiReport, TodayReportStatus } from "@/types/api";
 
 export default function DashboardPage() {
   const { language, text } = useLanguage();
@@ -23,14 +33,21 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [noReport, setNoReport] = useState(false);
+  const [todayStatus, setTodayStatus] = useState<TodayReportStatus | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [generateMessage, setGenerateMessage] = useState("");
 
   useEffect(() => {
     let active = true;
     (async () => {
       try {
-        const latest = await getLatestReport();
+        const [status, latest] = await Promise.all([
+          getTodayReportStatus(),
+          getLatestReport(),
+        ]);
         const items = await getReportNews(latest.report_id);
         if (active) {
+          setTodayStatus(status);
           setReport(latest);
           setNews(items);
         }
@@ -61,6 +78,42 @@ export default function DashboardPage() {
     };
   }, []);
 
+  const reloadLatest = async () => {
+    const [status, latest] = await Promise.all([
+      getTodayReportStatus(),
+      getLatestReport(),
+    ]);
+    const items = await getReportNews(latest.report_id);
+    setTodayStatus(status);
+    setReport(latest);
+    setNews(items);
+    setNoReport(false);
+  };
+
+  const generateToday = async () => {
+    setGenerating(true);
+    setError("");
+    setGenerateMessage("");
+    try {
+      const result = await generateTodayReport();
+      setGenerateMessage(result.message);
+      const items = await getReportNews(result.report.report_id);
+      setReport(result.report);
+      setTodayStatus(result.today_status);
+      setNews(items);
+      setNoReport(false);
+      await reloadLatest();
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "今日日报生成失败。",
+      );
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const coreArticle = useMemo(
     () =>
       news.find((item) => item.title === report?.core_topic) ??
@@ -83,12 +136,65 @@ export default function DashboardPage() {
   }
   if (noReport || !report) {
     return (
-      <StatusCard message="还没有生成日报，请先运行 python -m src.main --dry-run。" />
+      <StatusCard
+        message="还没有生成日报。可以点击按钮运行一次 python -m src.main --dry-run。"
+        action={
+          <Button
+            className="mt-5 rounded-full"
+            disabled={generating}
+            onClick={generateToday}
+          >
+            {generating ? (
+              <LoaderCircle className="size-4 animate-spin" />
+            ) : (
+              <RefreshCw className="size-4" />
+            )}
+            立即生成今日日报
+          </Button>
+        }
+      />
     );
   }
 
   return (
     <div className="space-y-10">
+      {todayStatus && !todayStatus.has_today_report ? (
+        <Card className="border-amber-300/70 bg-amber-50 text-amber-950">
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex gap-3">
+              <AlertTriangle className="mt-0.5 size-5 shrink-0" />
+              <div>
+                <p className="font-medium">
+                  今天还没有生成日报。当前显示的是{" "}
+                  {todayStatus.latest_report_date || report.report_date} 的历史日报。
+                </p>
+                <p className="mt-1 text-xs leading-5 text-amber-900/75">
+                  为避免浪费 API，网页刷新只检查状态，不会自动调用 DeepSeek。
+                </p>
+              </div>
+            </div>
+            <Button
+              className="rounded-full bg-amber-900 text-white hover:bg-amber-800"
+              disabled={generating}
+              onClick={generateToday}
+            >
+              {generating ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <RefreshCw className="size-4" />
+              )}
+              立即生成今日日报
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {generateMessage ? (
+        <p className="rounded-xl border border-emerald-600/20 bg-emerald-600/8 px-4 py-3 text-sm text-emerald-700">
+          {generateMessage}
+        </p>
+      ) : null}
+
       <section className="grid gap-6 xl:grid-cols-[1.45fr_0.55fr]">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -235,11 +341,13 @@ export default function DashboardPage() {
 function StatusCard({
   icon: Icon,
   message,
+  action,
   spin = false,
   destructive = false,
 }: {
   icon?: typeof LoaderCircle;
   message: string;
+  action?: React.ReactNode;
   spin?: boolean;
   destructive?: boolean;
 }) {
@@ -258,6 +366,7 @@ function StatusCard({
         >
           {message}
         </p>
+        {action}
       </CardContent>
     </Card>
   );
