@@ -1,17 +1,31 @@
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$python = (Get-Command python).Source
+$taskName = "DailyNewsDigestLocalServices"
+$runnerScript = Join-Path $projectRoot "scripts\startup_runner.ps1"
 $startupDirectory = [Environment]::GetFolderPath("Startup")
-$launcherPath = Join-Path $startupDirectory "DailyNewsDigest.cmd"
-$startScript = Join-Path $projectRoot "scripts\start_all.py"
+$legacyLauncherPath = Join-Path $startupDirectory "DailyNewsDigest.cmd"
 
-$content = @"
-@echo off
-cd /d "$projectRoot"
-"$python" "$startScript" >nul 2>&1
-"@
+if (-not (Test-Path -LiteralPath $runnerScript)) {
+    throw "startup_runner.ps1 was not found: $runnerScript"
+}
 
-Set-Content -LiteralPath $launcherPath -Value $content -Encoding ASCII
-Write-Output "Startup launcher installed: $launcherPath"
-Write-Output "FastAPI and Next.js will be restored after the next Windows sign-in."
+if (Test-Path -LiteralPath $legacyLauncherPath) {
+    Remove-Item -LiteralPath $legacyLauncherPath -Force
+    Write-Output "Removed legacy Startup launcher: $legacyLauncherPath"
+}
+
+$powerShell = (Get-Command powershell.exe).Source
+$action = New-ScheduledTaskAction -Execute $powerShell -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$runnerScript`"" -WorkingDirectory $projectRoot
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel LeastPrivilege
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -StartWhenAvailable
+
+$task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "Start Daily News Digest FastAPI, Next.js and local scheduler after Windows sign-in."
+Register-ScheduledTask -TaskName $taskName -InputObject $task -Force | Out-Null
+
+Write-Output "Windows startup scheduled task installed: $taskName"
+Write-Output "It will run after the next Windows sign-in."
+Write-Output "To start immediately, run:"
+Write-Output "python scripts/start_all.py"
+Write-Output "Startup log: logs/windows_startup.log"
