@@ -90,7 +90,8 @@ python scripts/start_all.py
 它只启动：
 
 1. FastAPI 后端；
-2. Next.js 前端。
+2. Next.js 前端；
+3. 本地邮件/日报调度器，前提是设置页已启用。
 
 启动后打开：
 
@@ -123,6 +124,7 @@ python scripts/status_api.py
 ```text
 logs/next_frontend.log
 logs/api_backend.log
+logs/windows_startup.log
 ```
 
 状态文件：
@@ -330,13 +332,45 @@ logs/local_mail_scheduler.log
 
 ## Windows 开机登录自启
 
+本地网站在电脑关机期间无法访问。开机自启只能做到：下次登录 Windows 后自动恢复
+FastAPI、Next.js 和本地调度器。
+
 安装当前用户的登录自启：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/install_startup.ps1
 ```
 
-下次登录 Windows 后会自动启动 FastAPI 和 Next.js。
+安装后会创建 Windows 任务计划程序任务：
+
+```text
+DailyNewsDigestLocalServices
+```
+
+下次登录 Windows 后会自动执行：
+
+```powershell
+python scripts/start_all.py
+```
+
+启动日志写入：
+
+```text
+logs/windows_startup.log
+```
+
+安装后可立即手动启动一次：
+
+```powershell
+python scripts/start_all.py
+```
+
+检查服务是否恢复：
+
+```powershell
+python scripts/status_frontend.py
+python scripts/status_api.py
+```
 
 移除自启：
 
@@ -344,8 +378,7 @@ powershell -ExecutionPolicy Bypass -File scripts/install_startup.ps1
 powershell -ExecutionPolicy Bypass -File scripts/uninstall_startup.ps1
 ```
 
-本地网站在电脑关机期间无法访问；开机自启表示下次登录 Windows 后自动恢复。
-电脑关机后仍需访问时，需要部署到云服务器。
+电脑关机后仍需访问时，需要部署到云服务器或使用 GitHub Pages 这类云端方案。
 
 ## VS Code 自动启动
 
@@ -479,6 +512,37 @@ python scripts/start_all.py
 
 再刷新 `http://localhost:3000`。
 
+### 关机重启后网页打不开
+
+本地网页不是云服务，关机后所有本地进程都会停止。重启后有两种处理方式：
+
+1. 手动恢复：
+
+```powershell
+python scripts/start_all.py
+```
+
+2. 安装 Windows 登录自启：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/install_startup.ps1
+```
+
+安装后下次登录 Windows 会自动恢复服务。若仍打不开，先检查：
+
+```powershell
+python scripts/status_frontend.py
+python scripts/status_api.py
+```
+
+再查看：
+
+```text
+logs/windows_startup.log
+logs/next_frontend.log
+logs/api_backend.log
+```
+
 ### 页面提示还没有生成日报
 
 网页只读取 SQLite 里已有的最新日报。如果当天还没有运行生成任务，就会显示昨天
@@ -518,4 +582,4 @@ python scripts/start_all.py
 ### 点赞、收藏或评论刷新后消失
 
 检查 FastAPI 是否运行，并确认 `data/news_digest.db` 可写。互动会直接保存到
-SQLite，正常情况下刷新页面后仍会保留。
+SQLite，不保存在浏览器缓存。
